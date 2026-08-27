@@ -2,16 +2,25 @@ import React from 'react';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { ChatArea } from '../src/components/ChatArea';
 import { useViewerStore } from '../src/store/useViewerStore';
+import { useConversationStore } from '../src/store/useConversationStore';
 import { ChatMessage } from '../src/types';
 
 describe('ChatArea Component & Citation Integration', () => {
   beforeEach(() => {
     useViewerStore.getState().resetViewer();
+    useConversationStore.getState().resetConversationStore();
     global.fetch = jest.fn().mockImplementation((url: string) => {
-      if (url.includes('/documents')) {
+      if (url.includes('/conversations')) {
         return Promise.resolve({
           ok: true,
-          json: async () => ({ documents: [] }),
+          json: async () => ({
+            id: 'conv-default',
+            title: 'Conversa Teste',
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+            files: [],
+            messages: [],
+          }),
         });
       }
       return Promise.resolve({
@@ -29,7 +38,7 @@ describe('ChatArea Component & Citation Integration', () => {
     await act(async () => {
       render(<ChatArea />);
     });
-    expect(screen.getByPlaceholderText(/pergunte algo sobre seus documentos/i)).toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/pergunte algo sobre os documentos/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /enviar/i })).toBeInTheDocument();
   });
 
@@ -83,6 +92,18 @@ describe('ChatArea Component & Citation Integration', () => {
       ]
     };
 
+    useConversationStore.setState({
+      activeConversationId: 'conv-test-1',
+      activeConversation: {
+        id: 'conv-test-1',
+        title: 'Conversa Ativa',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        files: [],
+        messages: [],
+      },
+    });
+
     (global.fetch as jest.Mock).mockImplementation((url: string) => {
       if (url.includes('/chat')) {
         return Promise.resolve({
@@ -100,7 +121,7 @@ describe('ChatArea Component & Citation Integration', () => {
       render(<ChatArea />);
     });
 
-    const input = screen.getByPlaceholderText(/pergunte algo sobre seus documentos/i);
+    const input = screen.getByPlaceholderText(/pergunte algo sobre os documentos/i);
     const sendButton = screen.getByRole('button', { name: /enviar/i });
 
     await act(async () => {

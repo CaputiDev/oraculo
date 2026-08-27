@@ -61,7 +61,7 @@ def test_ingest_pdf_success(rag_service, mock_pdf_parser, mock_chromadb_adapter)
         file_bytes=b"fake-binary-content",
         file_name="manual.pdf"
     )
-    mock_chromadb_adapter.add_chunks.assert_called_once_with(fake_chunks)
+    mock_chromadb_adapter.add_chunks.assert_called_once_with(fake_chunks, conversation_id="default")
     assert result["success"] is True
     assert result["file_name"] == "manual.pdf"
     assert result["total_chunks"] == 2
@@ -90,7 +90,7 @@ def test_ingest_text_success(rag_service, mock_pdf_parser, mock_chromadb_adapter
         text="Reunião de alinhamento sobre arquitetura.",
         title="anotacoes"
     )
-    mock_chromadb_adapter.add_chunks.assert_called_once_with(fake_chunks)
+    mock_chromadb_adapter.add_chunks.assert_called_once_with(fake_chunks, conversation_id="default")
     assert result["success"] is True
     assert result["file_name"] == "anotacoes"
     assert result["total_chunks"] == 1
@@ -125,7 +125,11 @@ def test_answer_query_with_citations(rag_service, mock_chromadb_adapter, mock_ge
     response = rag_service.answer_query(query="Qual é a taxa de juros?")
 
     # Assert
-    mock_chromadb_adapter.similarity_search.assert_called_once_with(query="Qual é a taxa de juros?", k=4)
+    mock_chromadb_adapter.similarity_search.assert_called_once_with(
+        query="Qual é a taxa de juros?",
+        conversation_id="default",
+        k=4
+    )
     mock_gemini_adapter.generate_rag_answer.assert_called_once_with(
         query="Qual é a taxa de juros?",
         context_chunks=retrieved_chunks

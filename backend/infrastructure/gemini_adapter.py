@@ -18,16 +18,17 @@ class RAGResponse(BaseModel):
 
 class GeminiAdapter:
     """
-    Adaptador de IA para o modelo Google Gemini (gemini-1.5-flash) com suporte a respostas estruturadas com citações.
+    Adaptador de IA para o modelo Google Gemini com suporte a respostas estruturadas com citações
+    e fallback dinâmico entre versões ativas (ex: gemini-3.7-flash, gemini-3.5-flash).
     """
 
     def __init__(
         self,
-        model_name: str = "gemini-1.5-flash",
+        model_name: Optional[str] = None,
         api_key: Optional[str] = None,
         temperature: float = 0.2
     ):
-        self.model_name = model_name
+        self.model_name = model_name or os.getenv("GEMINI_MODEL", "gemini-3.7-flash")
         self.api_key = api_key or os.getenv("GOOGLE_API_KEY")
         self.temperature = temperature
 
@@ -72,18 +73,40 @@ CONTEXTO DOS DOCUMENTOS:
 PERGUNTA DO USUÁRIO:
 {query}
 
-Responda SOMENTE o JSON válido, sem tags de markdown como ```json adicionais."""
+Responda SOMENTE o JSON válido, sem blocos markdown adicionais como ```json."""
+
+        candidate_models = [
+            self.model_name,
+            "gemini-3.7-flash",
+            "gemini-3.5-flash",
+            "gemma-4-31b-it",
+            "gemma-4-26b-a4b-it",
+        ]
+        candidate_models = list(dict.fromkeys(candidate_models))
 
         try:
             import google.generativeai as genai
             if self.api_key:
                 genai.configure(api_key=self.api_key)
-            
-            model = genai.GenerativeModel(
-                model_name=self.model_name,
-                generation_config={"temperature": self.temperature}
-            )
-            response = model.generate_content(prompt)
+
+            response = None
+            last_err = None
+            for model_candidate in candidate_models:
+                try:
+                    model = genai.GenerativeModel(
+                        model_name=model_candidate,
+                        generation_config={"temperature": self.temperature}
+                    )
+                    response = model.generate_content(prompt)
+                    self.model_name = model_candidate
+                    break
+                except Exception as e:
+                    last_err = e
+                    continue
+
+            if not response:
+                raise last_err or RuntimeError("Falha ao invocar modelo Gemini.")
+
             raw_text = response.text.strip()
             
             # Limpa possíveis blocos ```json
@@ -117,6 +140,6 @@ Responda SOMENTE o JSON válido, sem tags de markdown como ```json adicionais.""
                 for chunk in context_chunks[:2]
             ]
             return RAGResponse(
-                answer=f"Com base nos documentos consultados ({', '.join(set(c.file_name for c in context_chunks))}):\n\nNão foi possível processar a resposta formatada pelo LLM ({str(e)}).",
+                answer=f"Com base nos documentos consultados ({', '.join(set(c.file_name for c in context_chunks))}):\n\n{str(e)}",
                 citations=citations
             )

@@ -1,10 +1,11 @@
 'use client';
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Upload, FileText, Sparkles, AlertCircle, Loader2, Plus, Database, CheckCircle2 } from 'lucide-react';
+import { Send, Upload, FileText, Sparkles, Loader2, Plus, Database, CheckCircle2, Files } from 'lucide-react';
 import { ChatMessage, Citation } from '../types';
 import { CitationBadge } from './CitationBadge';
 import { useViewerStore } from '../store/useViewerStore';
+import { useConversationStore } from '../store/useConversationStore';
 
 interface ChatAreaProps {
   initialMessages?: ChatMessage[];
@@ -15,7 +16,16 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
   initialMessages = [],
   apiBaseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api',
 }) => {
-  const [messages, setMessages] = useState<ChatMessage[]>(initialMessages);
+  const {
+    activeConversationId,
+    activeConversation,
+    isLoadingDetail,
+    appendMessageToActive,
+    addFileToActive,
+    createConversation,
+    fetchConversations,
+  } = useConversationStore();
+
   const [inputQuery, setInputQuery] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<'chat' | 'upload' | 'text'>('chat');
@@ -29,7 +39,9 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   
-  const { setDocuments, documents } = useViewerStore();
+  const { setDocuments } = useViewerStore();
+
+  const messages: ChatMessage[] = activeConversation?.messages || initialMessages;
 
   const scrollToBottom = () => {
     if (typeof messagesEndRef.current?.scrollIntoView === 'function') {
@@ -41,27 +53,21 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
     scrollToBottom();
   }, [messages, isLoading]);
 
-  // Fetch available documents on load
+  // Sincroniza os arquivos da conversa ativa com o visualizador de documentos
   useEffect(() => {
-    const fetchDocs = async () => {
-      try {
-        const res = await fetch(`${apiBaseUrl}/documents`);
-        if (res.ok) {
-          const data = await res.json();
-          if (data.documents) {
-            setDocuments(data.documents);
-          }
-        }
-      } catch (err) {
-        console.warn('Servidor backend ainda não inicializado ou inacessível no momento.');
-      }
-    };
-    fetchDocs();
-  }, [apiBaseUrl, setDocuments]);
+    if (activeConversation?.files) {
+      setDocuments(activeConversation.files);
+    }
+  }, [activeConversation?.files, setDocuments]);
 
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!inputQuery.trim() || isLoading) return;
+
+    let targetConvId = activeConversationId;
+    if (!targetConvId) {
+      targetConvId = await createConversation(inputQuery.slice(0, 30), apiBaseUrl);
+    }
 
     const userMessage: ChatMessage = {
       id: `user-${Date.now()}`,
@@ -70,16 +76,16 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
       timestamp: new Date().toISOString(),
     };
 
-    setMessages((prev) => [...prev, userMessage]);
+    appendMessageToActive(userMessage);
     const currentQuery = inputQuery.trim();
     setInputQuery('');
     setIsLoading(true);
 
     try {
-      const response = await fetch(`${apiBaseUrl}/chat`, {
+      const response = await fetch(`${apiBaseUrl}/conversations/${encodeURIComponent(targetConvId)}/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: currentQuery, top_k: 4 }),
+        body: JSON.stringify({ query: currentQuery, conversation_id: targetConvId, top_k: 4 }),
       });
 
       if (!response.ok) {
@@ -96,7 +102,8 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
         timestamp: new Date().toISOString(),
       };
 
-      setMessages((prev) => [...prev, assistantMessage]);
+      appendMessageToActive(assistantMessage);
+      fetchConversations(apiBaseUrl);
     } catch (error: any) {
       const errorMessage: ChatMessage = {
         id: `err-${Date.now()}`,
@@ -104,7 +111,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
         content: `Erro ao processar a pergunta: ${error.message || 'Verifique se o backend está em execução.'}`,
         timestamp: new Date().toISOString(),
       };
-      setMessages((prev) => [...prev, errorMessage]);
+      appendMessageToActive(errorMessage);
     } finally {
       setIsLoading(false);
     }
@@ -114,6 +121,11 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
     const files = e.target.files;
     if (!files || files.length === 0) return;
 
+    let targetConvId = activeConversationId;
+    if (!targetConvId) {
+      targetConvId = await createConversation('Conversa com Documentos', apiBaseUrl);
+    }
+
     setIsUploading(true);
     setUploadFeedback(null);
 
@@ -121,22 +133,21 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
     for (let i = 0; i < files.length; i++) {
       formData.append('files', files[i]);
     }
+    formData.append('conversation_id', targetConvId);
 
     try {
-      const res = await fetch(`${apiBaseUrl}/upload`, {
+      const res = await fetch(`${apiBaseUrl}/conversations/${encodeURIComponent(targetConvId)}/upload`, {
         method: 'POST',
         body: formData,
       });
 
       const data = await res.json();
       if (data.success) {
-        setUploadFeedback(`Sucesso! ${data.total_processed} arquivo(s) indexado(s).`);
-        // Atualiza a lista de documentos
-        const docsRes = await fetch(`${apiBaseUrl}/documents`);
-        if (docsRes.ok) {
-          const docsData = await docsRes.json();
-          setDocuments(docsData.documents);
+        setUploadFeedback(`Sucesso! ${data.total_processed} arquivo(s) indexado(s) nesta conversa.`);
+        for (let i = 0; i < files.length; i++) {
+          addFileToActive(files[i].name);
         }
+        fetchConversations(apiBaseUrl);
       } else {
         setUploadFeedback('Erro durante a indexação de alguns arquivos.');
       }
@@ -152,24 +163,34 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
     e.preventDefault();
     if (!freeText.trim() || isUploading) return;
 
+    let targetConvId = activeConversationId;
+    if (!targetConvId) {
+      targetConvId = await createConversation(freeTextTitle || 'Texto Livre', apiBaseUrl);
+    }
+
     setIsUploading(true);
     setUploadFeedback(null);
 
+    const docTitle = freeTextTitle.trim() || 'Texto Livre';
+
     try {
-      const res = await fetch(`${apiBaseUrl}/upload-text`, {
+      const res = await fetch(`${apiBaseUrl}/conversations/${encodeURIComponent(targetConvId)}/upload-text`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           text: freeText.trim(),
-          title: freeTextTitle.trim() || 'Texto Livre',
+          title: docTitle,
+          conversation_id: targetConvId,
         }),
       });
 
       const data = await res.json();
       if (data.success) {
-        setUploadFeedback(`Texto '${data.file_name}' indexado com sucesso!`);
+        setUploadFeedback(`Texto '${data.file_name}' indexado com sucesso nesta conversa!`);
+        addFileToActive(docTitle);
         setFreeText('');
         setFreeTextTitle('');
+        fetchConversations(apiBaseUrl);
       } else {
         setUploadFeedback('Erro ao indexar texto.');
       }
@@ -184,13 +205,19 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
     <div className="flex flex-col h-full bg-slate-900 border-r border-slate-800 text-slate-100">
       {/* Header & Tabs */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-slate-800 bg-slate-950/60 backdrop-blur-sm">
-        <div className="flex items-center gap-2">
-          <div className="p-2 bg-indigo-600/20 text-indigo-400 rounded-lg border border-indigo-500/30">
-            <Sparkles className="w-5 h-5" />
+        <div className="flex items-center gap-2 truncate max-w-[50%]">
+          <div className="p-2 bg-indigo-600/20 text-indigo-400 rounded-lg border border-indigo-500/30 flex-shrink-0">
+            <Sparkles className="w-4 h-4" />
           </div>
-          <div>
-            <h2 className="text-sm font-bold tracking-wide text-white">Oráculo RAG AI</h2>
-            <p className="text-[11px] text-slate-400">Gemini 1.5 Flash + ChromaDB</p>
+          <div className="truncate">
+            <h2 className="text-sm font-bold tracking-wide text-white truncate">
+              {activeConversation?.title || 'Chat com IA'}
+            </h2>
+            <p className="text-[10px] text-slate-400 font-mono truncate">
+              {activeConversation?.files && activeConversation.files.length > 0
+                ? `${activeConversation.files.length} doc(s) vinculados`
+                : 'Nenhum documento anexado'}
+            </p>
           </div>
         </div>
 
@@ -236,15 +263,20 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
         <>
           {/* Messages Thread */}
           <div className="flex-1 overflow-y-auto p-4 space-y-4">
-            {messages.length === 0 ? (
+            {isLoadingDetail ? (
+              <div className="h-full flex items-center justify-center text-slate-400 text-xs gap-2">
+                <Loader2 className="w-5 h-5 animate-spin text-indigo-400" />
+                <span>Carregando histórico da conversa...</span>
+              </div>
+            ) : messages.length === 0 ? (
               <div className="h-full flex flex-col items-center justify-center text-center p-6 text-slate-400 space-y-3">
                 <div className="w-12 h-12 rounded-full bg-slate-800 flex items-center justify-center text-indigo-400 border border-slate-700">
                   <Database className="w-6 h-6" />
                 </div>
                 <div>
-                  <h3 className="font-semibold text-slate-200 text-sm">Nenhuma conversa iniciada</h3>
-                  <p className="text-xs text-slate-500 max-w-xs mt-1">
-                    Faça upload de documentos PDF ou insira textos para começar a consultar o Oráculo com citações interativas.
+                  <h3 className="font-semibold text-slate-200 text-sm">Conversa vazia</h3>
+                  <p className="text-xs text-slate-400 max-w-xs mt-1">
+                    Faça upload de arquivos PDF ou insira textos para alimentar a base desta conversa e faça perguntas com citações interativas.
                   </p>
                 </div>
               </div>
@@ -287,7 +319,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                       </div>
                     )}
                   </div>
-                  <span className="text-[10px] text-slate-500 mt-1 px-1">
+                  <span className="text-[10px] text-slate-400 mt-1 px-1">
                     {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                   </span>
                 </div>
@@ -297,7 +329,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
             {isLoading && (
               <div className="flex items-center gap-2 text-slate-400 text-xs py-2 px-3 bg-slate-800/50 rounded-lg w-fit border border-slate-700/40 animate-pulse">
                 <Loader2 className="w-4 h-4 animate-spin text-indigo-400" />
-                <span>Consultando documentos com Gemini AI...</span>
+                <span>Consultando documentos da conversa com Gemini AI...</span>
               </div>
             )}
             <div ref={messagesEndRef} />
@@ -310,7 +342,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                 type="text"
                 value={inputQuery}
                 onChange={(e) => setInputQuery(e.target.value)}
-                placeholder="Pergunte algo sobre seus documentos..."
+                placeholder="Pergunte algo sobre os documentos desta conversa..."
                 disabled={isLoading}
                 className="flex-1 bg-slate-800/90 border border-slate-700 text-slate-100 text-sm rounded-lg px-3.5 py-2.5 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent placeholder-slate-500 transition-all disabled:opacity-50"
               />
@@ -351,7 +383,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                 Clique para selecionar arquivos PDF
               </span>
               <span className="text-xs text-slate-400">
-                Suporte a múltiplos PDFs para chunking e vetorização com ChromaDB
+                Os arquivos serão associados exclusivamente a esta conversa.
               </span>
             </label>
           </div>
@@ -359,7 +391,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
           {isUploading && (
             <div className="flex items-center justify-center gap-2 p-3 bg-indigo-950/60 border border-indigo-700/50 rounded-lg text-indigo-200 text-sm">
               <Loader2 className="w-4 h-4 animate-spin text-indigo-400" />
-              <span>Processando e indexando documentos...</span>
+              <span>Processando e indexando documentos na conversa...</span>
             </div>
           )}
 
@@ -383,7 +415,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
               type="text"
               value={freeTextTitle}
               onChange={(e) => setFreeTextTitle(e.target.value)}
-              placeholder="Ex: Anotações da Reunião de Arquitetura"
+              placeholder="Ex: Anotações da Reunião"
               className="w-full bg-slate-800/90 border border-slate-700 text-slate-100 text-sm rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
             />
           </div>
@@ -396,7 +428,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
               value={freeText}
               onChange={(e) => setFreeText(e.target.value)}
               rows={8}
-              placeholder="Cole ou digite aqui o texto que deve ser incorporado à base de conhecimento RAG..."
+              placeholder="Cole ou digite aqui o texto que deve ser incorporado aos documentos desta conversa..."
               className="w-full bg-slate-800/90 border border-slate-700 text-slate-100 text-sm rounded-lg p-3 focus:ring-2 focus:ring-indigo-500 focus:outline-none resize-none leading-relaxed"
             />
           </div>
@@ -409,12 +441,12 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
             {isUploading ? (
               <>
                 <Loader2 className="w-4 h-4 animate-spin" />
-                <span>Indexando Texto...</span>
+                <span>Indexando Texto na Conversa...</span>
               </>
             ) : (
               <>
                 <Plus className="w-4 h-4" />
-                <span>Adicionar à Base de Conhecimento</span>
+                <span>Adicionar aos Documentos da Conversa</span>
               </>
             )}
           </button>
