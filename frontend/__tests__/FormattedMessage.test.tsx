@@ -7,7 +7,7 @@ describe('FormattedMessage Component - Inline Footnote Citations', () => {
   beforeEach(() => {
     useViewerStore.getState().resetViewer();
     useViewerStore.setState({
-      documents: ['contrato.pdf', 'manual.pdf', 'diretrizes.pdf'],
+      documents: ['contrato.pdf', 'manual.pdf', 'tcc_pedro.pdf'],
     });
   });
 
@@ -43,5 +43,21 @@ describe('FormattedMessage Component - Inline Footnote Citations', () => {
     const storeState = useViewerStore.getState();
     expect(storeState.activeFile).toBe('manual.pdf');
     expect(storeState.activePage).toBe(2);
+  });
+
+  it('deve identificar citações com múltiplas páginas como [tcc_pedro.pdf:11, 15] e renderizar badge clicável', () => {
+    const text = 'O TCC de Pedro trata de IA e NLP [tcc_pedro.pdf:11, 15].';
+    render(<FormattedMessage content={text} documents={['contrato.pdf', 'manual.pdf', 'tcc_pedro.pdf']} />);
+
+    expect(screen.queryByText(/\[tcc_pedro\.pdf:11, 15\]/)).not.toBeInTheDocument();
+    const inlineBadge = screen.getByTestId('inline-citation-badge');
+    expect(inlineBadge).toBeInTheDocument();
+    // tcc_pedro.pdf é o 3º documento -> número 3
+    expect(inlineBadge).toHaveTextContent('3');
+
+    fireEvent.click(inlineBadge);
+    const storeState = useViewerStore.getState();
+    expect(storeState.activeFile).toBe('tcc_pedro.pdf');
+    expect(storeState.activePage).toBe(11);
   });
 });

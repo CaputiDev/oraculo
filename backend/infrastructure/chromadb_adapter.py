@@ -1,12 +1,14 @@
 import os
 from typing import List, Optional, Dict, Any
 from infrastructure.pdf_parser import DocumentChunk
+from infrastructure.bm25_retriever import BM25Retriever
 
 
 class ChromaDBAdapter:
     """
     Adaptador de infraestrutura para o banco vetorial ChromaDB com suporte a persistência local,
-    particionamento por conversation_id, cache em memória e geração de Batch Embeddings (em lote).
+    particionamento por conversation_id, cache em memória, geração de Batch Embeddings (em lote)
+    e Busca Híbrida (BM25 + Chroma com Reciprocal Rank Fusion - RRF).
     """
 
     def __init__(
@@ -14,7 +16,8 @@ class ChromaDBAdapter:
         persist_directory: str = "./vector_store",
         collection_name: str = "oraculo_knowledge_base",
         embedding_model_name: Optional[str] = None,
-        api_key: Optional[str] = None
+        api_key: Optional[str] = None,
+        bm25_retriever: Optional[BM25Retriever] = None
     ):
         self.persist_directory = persist_directory
         self.collection_name = collection_name
@@ -23,6 +26,7 @@ class ChromaDBAdapter:
         )
         self.api_key = api_key or os.getenv("GOOGLE_API_KEY")
         self._query_cache: Dict[str, List[float]] = {}
+        self.bm25_retriever = bm25_retriever or BM25Retriever()
 
         os.makedirs(self.persist_directory, exist_ok=True)
         try:
@@ -153,7 +157,7 @@ class ChromaDBAdapter:
     def add_chunks(self, chunks: List[DocumentChunk], conversation_id: str = "default") -> int:
         """
         Adiciona lista de chunks de documentos ao ChromaDB associados a uma conversation_id
-        utilizando Batch Embeddings de alta performance.
+        utilizando Batch Embeddings e indexa simultaneamente no BM25.
         """
         if not chunks:
             return 0
@@ -181,16 +185,39 @@ class ChromaDBAdapter:
             metadatas=metadatas,
             embeddings=embeddings
         )
+
+        # Indexa no motor léxico BM25 com os IDs unificados
+        bm25_chunks = [
+            DocumentChunk(
+                chunk_id=ids[i],
+                file_name=chunks[i].file_name,
+                page_number=chunks[i].page_number,
+                content=chunks[i].content,
+                metadata=metadatas[i]
+            )
+            for i in range(len(chunks))
+        ]
+        self.bm25_retriever.add_chunks(bm25_chunks, conversation_id=conversation_id)
+
         return len(chunks)
+
+    def _ensure_bm25_loaded(self, conversation_id: str):
+        """
+        Garante que o índice BM25 em memória contenha os chunks persistidos no ChromaDB.
+        """
+        if conversation_id not in self.bm25_retriever._conversation_indexes:
+            chunks = self.get_all_conversation_chunks(conversation_id)
+            if chunks:
+                self.bm25_retriever.add_chunks(chunks, conversation_id=conversation_id)
 
     def similarity_search(
         self,
         query: str,
         conversation_id: Optional[str] = None,
-        k: int = 3
+        k: int = 4
     ) -> List[DocumentChunk]:
         """
-        Executa busca semântica filtrando exclusivamente pelos chunks da conversa ativa.
+        Executa busca semântica densa filtrando exclusivamente pelos chunks da conversa ativa.
         """
         if not self.collection:
             raise RuntimeError("ChromaDB client não foi inicializado corretamente.")
@@ -227,6 +254,57 @@ class ChromaDBAdapter:
 
         return retrieved_chunks
 
+    def hybrid_search(
+        self,
+        query: str,
+        conversation_id: Optional[str] = None,
+        k: int = 4,
+        rrf_k: int = 60
+    ) -> List[DocumentChunk]:
+        """
+        Executa Busca Híbrida (Busca Vetorial Densa + BM25 Léxico Esparso)
+        com re-ranqueamento via Reciprocal Rank Fusion (RRF).
+        """
+        if not query or not query.strip():
+            return []
+
+        cid = conversation_id or "default"
+        self._ensure_bm25_loaded(cid)
+
+        fetch_k = max(k * 2, 8)
+
+        # 1. Busca Semântica Densa (ChromaDB)
+        dense_results = self.similarity_search(query, conversation_id=cid, k=fetch_k)
+
+        # 2. Busca Léxica Esparsa (BM25)
+        bm25_results = self.bm25_retriever.search(query, conversation_id=cid, k=fetch_k)
+
+        if not dense_results and not bm25_results:
+            return []
+
+        # 3. Fusão e Re-ranqueamento via Reciprocal Rank Fusion (RRF)
+        rrf_scores: Dict[str, float] = {}
+        chunk_map: Dict[str, DocumentChunk] = {}
+
+        for rank, chunk in enumerate(dense_results, 1):
+            chunk_id = chunk.chunk_id
+            chunk_map[chunk_id] = chunk
+            rrf_scores[chunk_id] = rrf_scores.get(chunk_id, 0.0) + (1.0 / (rrf_k + rank))
+
+        for rank, chunk in enumerate(bm25_results, 1):
+            chunk_id = chunk.chunk_id
+            chunk_map[chunk_id] = chunk
+            rrf_scores[chunk_id] = rrf_scores.get(chunk_id, 0.0) + (1.0 / (rrf_k + rank))
+
+        # 4. Ordena por score RRF decrescente
+        sorted_ids = sorted(
+            rrf_scores.keys(),
+            key=lambda item_id: rrf_scores[item_id],
+            reverse=True
+        )
+
+        return [chunk_map[item_id] for item_id in sorted_ids[:k]]
+
     def get_indexed_files(self, conversation_id: Optional[str] = None) -> List[str]:
         """
         Retorna os arquivos indexados filtrados por conversation_id.
@@ -244,6 +322,37 @@ class ChromaDBAdapter:
             if meta and "file_name" in meta:
                 files.add(meta["file_name"])
         return sorted(list(files))
+
+    def get_all_conversation_chunks(self, conversation_id: str) -> List[DocumentChunk]:
+        """
+        Recupera todos os chunks pertencentes a uma conversa no ChromaDB.
+        """
+        if not self.collection:
+            return []
+
+        try:
+            data = self.collection.get(
+                where={"conversation_id": conversation_id},
+                include=["documents", "metadatas"]
+            )
+            if not data or not data.get("documents"):
+                return []
+
+            chunks = []
+            for i in range(len(data["documents"])):
+                meta = data["metadatas"][i] or {}
+                chunks.append(
+                    DocumentChunk(
+                        chunk_id=data["ids"][i],
+                        file_name=meta.get("file_name", "Desconhecido"),
+                        page_number=int(meta.get("page_number", 1)),
+                        content=data["documents"][i],
+                        metadata=meta
+                    )
+                )
+            return chunks
+        except Exception:
+            return []
 
     def get_document_chunks(self, file_name: str, conversation_id: Optional[str] = None) -> List[DocumentChunk]:
         """
@@ -290,8 +399,9 @@ class ChromaDBAdapter:
 
     def delete_conversation_chunks(self, conversation_id: str):
         """
-        Remove todos os chunks associados a uma conversa do banco vetorial.
+        Remove todos os chunks associados a uma conversa do banco vetorial e do índice BM25.
         """
+        self.bm25_retriever.delete_conversation(conversation_id)
         if not self.collection:
             return
         try:

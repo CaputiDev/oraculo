@@ -105,16 +105,14 @@ def test_rag_service_isolates_conversations(temp_db):
     assert "docB.pdf" not in temp_db.get_conversation_files("conv_A")
 
     # Query in Conversation A
-    mock_vector_store.similarity_search.return_value = fake_chunk_a
+    mock_vector_store.hybrid_search.return_value = fake_chunk_a
     mock_llm_adapter.generate_rag_answer.return_value = RAGResponse(
         answer="Resposta A [Fonte: docA.pdf, pág. 1].",
         citations=[Citation(file_name="docA.pdf", page_number=1, snippet="Conteúdo A")]
     )
 
     resp_a = service.answer_query("Pergunta sobre A", conversation_id="conv_A")
-
-    # Verifies similarity_search was called strictly with conversation_id="conv_A"
-    mock_vector_store.similarity_search.assert_called_with(
+    mock_vector_store.hybrid_search.assert_called_with(
         query="Pergunta sobre A",
         conversation_id="conv_A",
         k=4

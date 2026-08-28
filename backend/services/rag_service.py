@@ -21,6 +21,9 @@ class IVectorStore(Protocol):
     def similarity_search(self, query: str, conversation_id: Optional[str] = None, k: int = 4) -> List[DocumentChunk]:
         ...
 
+    def hybrid_search(self, query: str, conversation_id: Optional[str] = None, k: int = 4) -> List[DocumentChunk]:
+        ...
+
     def get_indexed_files(self, conversation_id: Optional[str] = None) -> List[str]:
         ...
 
@@ -162,12 +165,19 @@ class RAGService:
                 )
             self.conversation_repo.add_message(conversation_id, "user", query)
 
-        # 2. Recuperação Semântica Filtrada pela Conversa
-        retrieved_chunks = self.vector_store.similarity_search(
-            query=query,
-            conversation_id=conversation_id,
-            k=top_k
-        )
+        # 2. Recuperação Híbrida Filtrada pela Conversa (BM25 + Vetorial com RRF)
+        if hasattr(self.vector_store, "hybrid_search"):
+            retrieved_chunks = self.vector_store.hybrid_search(
+                query=query,
+                conversation_id=conversation_id,
+                k=top_k
+            )
+        else:
+            retrieved_chunks = self.vector_store.similarity_search(
+                query=query,
+                conversation_id=conversation_id,
+                k=top_k
+            )
 
         # 3. Geração Fundamentada
         response = self.llm_adapter.generate_rag_answer(

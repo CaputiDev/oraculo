@@ -107,7 +107,7 @@ def test_answer_query_with_citations(rag_service, mock_chromadb_adapter, mock_ge
             metadata={"source": "contrato.pdf", "page": 3}
         )
     ]
-    mock_chromadb_adapter.similarity_search.return_value = retrieved_chunks
+    mock_chromadb_adapter.hybrid_search.return_value = retrieved_chunks
 
     expected_llm_response = RAGResponse(
         answer="A taxa de juros anual acordada é de 12% [Fonte: contrato.pdf, pág. 3].",
@@ -125,7 +125,7 @@ def test_answer_query_with_citations(rag_service, mock_chromadb_adapter, mock_ge
     response = rag_service.answer_query(query="Qual é a taxa de juros?")
 
     # Assert
-    mock_chromadb_adapter.similarity_search.assert_called_once_with(
+    mock_chromadb_adapter.hybrid_search.assert_called_once_with(
         query="Qual é a taxa de juros?",
         conversation_id="default",
         k=4
@@ -141,7 +141,7 @@ def test_answer_query_with_citations(rag_service, mock_chromadb_adapter, mock_ge
 
 
 def test_answer_query_empty_knowledge_base(rag_service, mock_chromadb_adapter, mock_gemini_adapter):
-    mock_chromadb_adapter.similarity_search.return_value = []
+    mock_chromadb_adapter.hybrid_search.return_value = []
     mock_gemini_adapter.generate_rag_answer.return_value = RAGResponse(
         answer="Não encontrei informações relevantes nos documentos fornecidos.",
         citations=[]
