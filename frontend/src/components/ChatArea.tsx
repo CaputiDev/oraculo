@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { 
   Send, 
   Upload, 
@@ -13,7 +13,9 @@ import {
   Menu, 
   PanelLeft, 
   PanelRight, 
-  BookOpen 
+  BookOpen,
+  FileUp,
+  AlertCircle
 } from 'lucide-react';
 import { ChatMessage, Citation } from '../types';
 import { CitationBadge } from './CitationBadge';
@@ -47,11 +49,15 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
   const [isLoading, setIsLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<'chat' | 'upload' | 'text'>('chat');
   
+  // Drag & drop states
+  const [isDraggingOver, setIsDraggingOver] = useState(false);
+  const [dragCounter, setDragCounter] = useState(0);
+
   // Free text upload state
   const [freeText, setFreeText] = useState('');
   const [freeTextTitle, setFreeTextTitle] = useState('');
   const [isUploading, setIsUploading] = useState(false);
-  const [uploadFeedback, setUploadFeedback] = useState<string | null>(null);
+  const [uploadFeedback, setUploadFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -100,7 +106,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
       const response = await fetch(`${apiBaseUrl}/conversations/${encodeURIComponent(targetConvId)}/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: currentQuery, conversation_id: targetConvId, top_k: 4 }),
+        body: JSON.stringify({ query: currentQuery, conversation_id: targetConvId, top_k: 3 }),
       });
 
       if (!response.ok) {
@@ -132,9 +138,24 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
     }
   };
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files || files.length === 0) return;
+  const uploadFiles = async (filesToUpload: FileList | File[]) => {
+    if (!filesToUpload || filesToUpload.length === 0) return;
+
+    const validFiles: File[] = [];
+    for (let i = 0; i < filesToUpload.length; i++) {
+      const file = filesToUpload[i];
+      if (file.name.toLowerCase().endsWith('.pdf')) {
+        validFiles.push(file);
+      }
+    }
+
+    if (validFiles.length === 0) {
+      setUploadFeedback({
+        type: 'error',
+        message: 'Apenas arquivos em formato PDF (.pdf) são aceitos para indexação.',
+      });
+      return;
+    }
 
     let targetConvId = activeConversationId;
     if (!targetConvId) {
@@ -145,8 +166,8 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
     setUploadFeedback(null);
 
     const formData = new FormData();
-    for (let i = 0; i < files.length; i++) {
-      formData.append('files', files[i]);
+    for (let i = 0; i < validFiles.length; i++) {
+      formData.append('files', validFiles[i]);
     }
     formData.append('conversation_id', targetConvId);
 
@@ -158,19 +179,76 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
 
       const data = await res.json();
       if (data.success) {
-        setUploadFeedback(`Sucesso! ${data.total_processed} arquivo(s) indexado(s) nesta conversa.`);
-        for (let i = 0; i < files.length; i++) {
-          addFileToActive(files[i].name);
+        setUploadFeedback({
+          type: 'success',
+          message: `Sucesso! ${data.total_processed} arquivo(s) PDF indexado(s) via Batch Embedding nesta conversa.`,
+        });
+        for (let i = 0; i < validFiles.length; i++) {
+          addFileToActive(validFiles[i].name);
         }
         fetchConversations(apiBaseUrl);
       } else {
-        setUploadFeedback('Erro durante a indexação de alguns arquivos.');
+        setUploadFeedback({
+          type: 'error',
+          message: 'Erro durante o processamento de alguns arquivos.',
+        });
       }
     } catch (err: any) {
-      setUploadFeedback(`Erro no upload: ${err.message}`);
+      setUploadFeedback({
+        type: 'error',
+        message: `Erro no upload: ${err.message}`,
+      });
     } finally {
       setIsUploading(false);
+      setIsDraggingOver(false);
+      setDragCounter(0);
       if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files) {
+      uploadFiles(e.target.files);
+    }
+  };
+
+  // Drag & Drop handlers globais e da zona de drop
+  const handleDragEnter = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragCounter((prev) => prev + 1);
+    if (e.dataTransfer.items && e.dataTransfer.items.length > 0) {
+      setIsDraggingOver(true);
+    }
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragCounter((prev) => {
+      const next = prev - 1;
+      if (next <= 0) {
+        setIsDraggingOver(false);
+        return 0;
+      }
+      return next;
+    });
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = 'copy';
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDraggingOver(false);
+    setDragCounter(0);
+
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      uploadFiles(e.dataTransfer.files);
     }
   };
 
@@ -201,16 +279,25 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
 
       const data = await res.json();
       if (data.success) {
-        setUploadFeedback(`Texto '${data.file_name}' indexado com sucesso nesta conversa!`);
+        setUploadFeedback({
+          type: 'success',
+          message: `Texto '${data.file_name}' indexado com sucesso nesta conversa!`,
+        });
         addFileToActive(docTitle);
         setFreeText('');
         setFreeTextTitle('');
         fetchConversations(apiBaseUrl);
       } else {
-        setUploadFeedback('Erro ao indexar texto.');
+        setUploadFeedback({
+          type: 'error',
+          message: 'Erro ao indexar texto.',
+        });
       }
     } catch (err: any) {
-      setUploadFeedback(`Erro: ${err.message}`);
+      setUploadFeedback({
+        type: 'error',
+        message: `Erro: ${err.message}`,
+      });
     } finally {
       setIsUploading(false);
     }
@@ -219,7 +306,31 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
   const docCount = activeConversation?.files?.length ?? documents?.length ?? 0;
 
   return (
-    <div className="flex flex-col h-full bg-slate-900 text-slate-100 relative">
+    <div 
+      className="flex flex-col h-full bg-slate-900 text-slate-100 relative"
+      onDragEnter={handleDragEnter}
+      onDragLeave={handleDragLeave}
+      onDragOver={handleDragOver}
+      onDrop={handleDrop}
+    >
+      {/* Overlay Visual Global de Drag & Drop */}
+      {isDraggingOver && (
+        <div 
+          data-testid="drag-drop-overlay"
+          className="absolute inset-0 z-50 bg-indigo-950/90 backdrop-blur-md border-4 border-dashed border-indigo-400 flex flex-col items-center justify-center p-6 text-center animate-in fade-in duration-200"
+        >
+          <div className="p-5 bg-indigo-600/30 text-indigo-300 rounded-3xl border border-indigo-400/50 shadow-2xl mb-4 animate-bounce">
+            <FileUp className="w-12 h-12" />
+          </div>
+          <h3 className="text-xl font-bold text-white mb-1">
+            Solte seus arquivos PDF aqui
+          </h3>
+          <p className="text-sm text-indigo-200 max-w-sm">
+            Eles serão processados em alta velocidade com PyMuPDF e Batch Embeddings nesta conversa.
+          </p>
+        </div>
+      )}
+
       {/* Header & Quick Action Buttons */}
       <div className="flex items-center justify-between px-3 sm:px-4 py-2.5 sm:py-3 border-b border-slate-800 bg-slate-950/70 backdrop-blur-md gap-2 flex-wrap sm:flex-nowrap">
         {/* Left: Sidebar Toggle & Title */}
@@ -270,7 +381,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
               }`}
             >
               <Upload className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
-              <span className="hidden xs:inline">Upload</span>
+              <span className="hidden xs:inline">Upload PDF</span>
             </button>
             <button
               onClick={() => setActiveTab('text')}
@@ -327,7 +438,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                   <div>
                     <h3 className="font-semibold text-slate-200 text-sm">Conversa vazia</h3>
                     <p className="text-xs text-slate-400 max-w-sm mt-1 leading-relaxed">
-                      Faça upload de arquivos PDF ou insira textos na barra acima para alimentar esta conversa e faça perguntas com citações interativas.
+                      Arraste e solte arquivos PDF aqui ou use as abas acima para alimentar a base desta conversa e faça perguntas com citações.
                     </p>
                   </div>
                 </div>
@@ -414,11 +525,13 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
       {/* Upload PDF Tab */}
       {activeTab === 'upload' && (
         <div className="p-4 sm:p-8 flex-1 overflow-y-auto space-y-6">
-          <div className="max-w-xl mx-auto border-2 border-dashed border-slate-700 hover:border-indigo-500 rounded-2xl p-6 sm:p-10 text-center transition-all bg-slate-800/30 flex flex-col items-center justify-center">
+          <div 
+            className="max-w-xl mx-auto border-2 border-dashed border-slate-700 hover:border-indigo-500 rounded-2xl p-6 sm:p-10 text-center transition-all bg-slate-800/30 hover:bg-slate-800/50 flex flex-col items-center justify-center group"
+          >
             <input
               type="file"
               ref={fileInputRef}
-              onChange={handleFileUpload}
+              onChange={handleFileInputChange}
               multiple
               accept="application/pdf"
               className="hidden"
@@ -426,16 +539,16 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
             />
             <label
               htmlFor="pdf-upload-input"
-              className="cursor-pointer flex flex-col items-center space-y-3"
+              className="cursor-pointer flex flex-col items-center space-y-3 w-full"
             >
-              <div className="p-3 sm:p-4 bg-indigo-600/20 text-indigo-400 rounded-2xl border border-indigo-500/30 shadow-inner">
+              <div className="p-3 sm:p-4 bg-indigo-600/20 group-hover:bg-indigo-600/30 text-indigo-400 rounded-2xl border border-indigo-500/30 shadow-inner transition-all">
                 <Upload className="w-6 h-6 sm:w-8 sm:h-8" />
               </div>
               <span className="text-sm sm:text-base font-semibold text-slate-200">
-                Clique para selecionar arquivos PDF
+                Arraste e solte seus PDFs aqui ou clique para selecionar
               </span>
               <span className="text-xs text-slate-400 max-w-xs leading-relaxed">
-                Os arquivos serão anexados exclusivamente aos documentos desta conversa.
+                Suporta múltiplos arquivos simultâneos com extração de alta velocidade e indexação em lote.
               </span>
             </label>
           </div>
@@ -448,9 +561,19 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
           )}
 
           {uploadFeedback && (
-            <div className="max-w-xl mx-auto p-3.5 bg-slate-800/80 border border-slate-700 rounded-xl text-xs sm:text-sm text-slate-300 flex items-center gap-2.5">
-              <CheckCircle2 className="w-4 h-4 sm:w-5 sm:h-5 text-emerald-400 flex-shrink-0" />
-              <span>{uploadFeedback}</span>
+            <div 
+              className={`max-w-xl mx-auto p-3.5 rounded-xl text-xs sm:text-sm flex items-center gap-2.5 border ${
+                uploadFeedback.type === 'success'
+                  ? 'bg-slate-800/80 border-slate-700 text-slate-300'
+                  : 'bg-red-950/60 border-red-800/60 text-red-200'
+              }`}
+            >
+              {uploadFeedback.type === 'success' ? (
+                <CheckCircle2 className="w-4 h-4 sm:w-5 sm:h-5 text-emerald-400 flex-shrink-0" />
+              ) : (
+                <AlertCircle className="w-4 h-4 sm:w-5 sm:h-5 text-red-400 flex-shrink-0" />
+              )}
+              <span>{uploadFeedback.message}</span>
             </div>
           )}
         </div>
@@ -504,9 +627,19 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
           </button>
 
           {uploadFeedback && (
-            <div className="p-3.5 bg-slate-800/80 border border-slate-700 rounded-xl text-xs sm:text-sm text-slate-300 flex items-center gap-2.5">
-              <CheckCircle2 className="w-4 h-4 sm:w-5 sm:h-5 text-emerald-400 flex-shrink-0" />
-              <span>{uploadFeedback}</span>
+            <div 
+              className={`p-3.5 rounded-xl text-xs sm:text-sm flex items-center gap-2.5 border ${
+                uploadFeedback.type === 'success'
+                  ? 'bg-slate-800/80 border-slate-700 text-slate-300'
+                  : 'bg-red-950/60 border-red-800/60 text-red-200'
+              }`}
+            >
+              {uploadFeedback.type === 'success' ? (
+                <CheckCircle2 className="w-4 h-4 sm:w-5 sm:h-5 text-emerald-400 flex-shrink-0" />
+              ) : (
+                <AlertCircle className="w-4 h-4 sm:w-5 sm:h-5 text-red-400 flex-shrink-0" />
+              )}
+              <span>{uploadFeedback.message}</span>
             </div>
           )}
         </form>

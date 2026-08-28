@@ -208,7 +208,7 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({
                 value={activePage}
                 onChange={(e) => setActivePage(parseInt(e.target.value) || 1)}
                 min={1}
-                className="w-9 bg-slate-900 border border-slate-700 text-center rounded py-0.5 text-xs text-indigo-300 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                className="w-9 bg-slate-900 border border-slate-700 text-center rounded py-0.5 text-xs text-indigo-300 focus:outline-none focus:ring-1 focus:ring-indigo-500 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
               />
               <span className="text-slate-500">/</span>
               <span className="text-slate-400">{totalPages > 0 ? totalPages : '—'}</span>

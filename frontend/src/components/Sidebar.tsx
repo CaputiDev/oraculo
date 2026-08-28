@@ -8,7 +8,6 @@ import {
   Files, 
   Sparkles, 
   Clock, 
-  X,
   PanelLeftClose
 } from 'lucide-react';
 import { useConversationStore } from '../store/useConversationStore';
@@ -87,7 +86,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </div>
             <div>
               <h1 className="text-xs font-bold tracking-wider text-slate-100 uppercase">Oráculo RAG</h1>
-              <p className="text-[10px] text-slate-400 font-mono">Multi-Sessão & Citações</p>
             </div>
           </div>
 
@@ -177,14 +175,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
             );
           })
         )}
-      </div>
-
-      {/* Footer System Status */}
-      <div className="p-3 border-t border-slate-800/80 bg-slate-950/60 text-[11px] text-slate-400 flex items-center justify-between">
-        <div className="flex items-center gap-1.5">
-          <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-          <span className="font-mono text-[10px]">ChromaDB + Gemini 3.7</span>
-        </div>
       </div>
     </aside>
   );

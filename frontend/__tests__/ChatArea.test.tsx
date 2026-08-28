@@ -136,4 +136,48 @@ describe('ChatArea Component & Citation Integration', () => {
     expect(await screen.findByText(/resposta simulada do RAG com Gemini/i)).toBeInTheDocument();
     expect(await screen.findByText('manual.pdf')).toBeInTheDocument();
   });
+
+  it('deve exibir overlay visual ao arrastar arquivo PDF sobre a tela e processar o drop', async () => {
+    (global.fetch as jest.Mock).mockImplementation((url: string) => {
+      if (url.includes('/upload')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ success: true, total_processed: 1 }),
+        });
+      }
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({ id: 'conv-1', title: 'Conversa', files: [], messages: [] }),
+      });
+    });
+
+    const { container } = render(<ChatArea />);
+
+    const mainContainer = container.firstChild as HTMLElement;
+
+    // Simula evento dragEnter
+    await act(async () => {
+      fireEvent.dragEnter(mainContainer, {
+        dataTransfer: {
+          items: [{ kind: 'file', type: 'application/pdf' }],
+        },
+      });
+    });
+
+    expect(screen.getByTestId('drag-drop-overlay')).toBeInTheDocument();
+    expect(screen.getByText(/solte seus arquivos pdf aqui/i)).toBeInTheDocument();
+
+    // Simula evento drop com arquivo PDF
+    const fakeFile = new File(['fake-content'], 'contrato.pdf', { type: 'application/pdf' });
+    await act(async () => {
+      fireEvent.drop(mainContainer, {
+        dataTransfer: {
+          files: [fakeFile],
+        },
+      });
+    });
+
+    // O overlay deve sumir após o drop
+    expect(screen.queryByTestId('drag-drop-overlay')).not.toBeInTheDocument();
+  });
 });
