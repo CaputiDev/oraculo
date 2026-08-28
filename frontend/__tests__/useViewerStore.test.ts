@@ -5,12 +5,13 @@ describe('useViewerStore - Zustand Store', () => {
     useViewerStore.getState().resetViewer();
   });
 
-  it('deve inicializar com valores padrões', () => {
+  it('deve inicializar com valores padrões e painel recolhido por padrão', () => {
     const state = useViewerStore.getState();
     expect(state.activeFile).toBeNull();
     expect(state.activePage).toBe(1);
     expect(state.totalPages).toBe(1);
     expect(state.documents).toEqual([]);
+    expect(state.isViewerOpen).toBe(false);
   });
 
   it('deve atualizar o arquivo ativo corretamente', () => {
@@ -29,12 +30,22 @@ describe('useViewerStore - Zustand Store', () => {
     expect(useViewerStore.getState().activePage).toBe(1);
   });
 
-  it('deve executar jumpToCitation atualizando arquivo e página simultaneamente', () => {
+  it('deve executar jumpToCitation atualizando arquivo, página e abrindo o visualizador', () => {
+    expect(useViewerStore.getState().isViewerOpen).toBe(false);
     useViewerStore.getState().jumpToCitation('relatorio_anual.pdf', 7);
     
     const state = useViewerStore.getState();
     expect(state.activeFile).toBe('relatorio_anual.pdf');
     expect(state.activePage).toBe(7);
+    expect(state.isViewerOpen).toBe(true);
+  });
+
+  it('deve alternar a visibilidade do visualizador', () => {
+    expect(useViewerStore.getState().isViewerOpen).toBe(false);
+    useViewerStore.getState().toggleViewer();
+    expect(useViewerStore.getState().isViewerOpen).toBe(true);
+    useViewerStore.getState().setViewerOpen(false);
+    expect(useViewerStore.getState().isViewerOpen).toBe(false);
   });
 
   it('deve registrar lista de documentos disponíveis', () => {

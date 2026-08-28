@@ -2,16 +2,25 @@ import React from 'react';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { ChatArea } from '../src/components/ChatArea';
 import { useViewerStore } from '../src/store/useViewerStore';
+import { useConversationStore } from '../src/store/useConversationStore';
 import { ChatMessage } from '../src/types';
 
 describe('ChatArea Component & Citation Integration', () => {
   beforeEach(() => {
     useViewerStore.getState().resetViewer();
+    useConversationStore.getState().resetConversationStore();
     global.fetch = jest.fn().mockImplementation((url: string) => {
-      if (url.includes('/documents')) {
+      if (url.includes('/conversations')) {
         return Promise.resolve({
           ok: true,
-          json: async () => ({ documents: [] }),
+          json: async () => ({
+            id: 'conv-default',
+            title: 'Conversa Teste',
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+            files: [],
+            messages: [],
+          }),
         });
       }
       return Promise.resolve({
@@ -29,7 +38,7 @@ describe('ChatArea Component & Citation Integration', () => {
     await act(async () => {
       render(<ChatArea />);
     });
-    expect(screen.getByPlaceholderText(/pergunte algo sobre seus documentos/i)).toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/pergunte algo sobre os documentos/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /enviar/i })).toBeInTheDocument();
   });
 
@@ -83,6 +92,18 @@ describe('ChatArea Component & Citation Integration', () => {
       ]
     };
 
+    useConversationStore.setState({
+      activeConversationId: 'conv-test-1',
+      activeConversation: {
+        id: 'conv-test-1',
+        title: 'Conversa Ativa',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        files: [],
+        messages: [],
+      },
+    });
+
     (global.fetch as jest.Mock).mockImplementation((url: string) => {
       if (url.includes('/chat')) {
         return Promise.resolve({
@@ -100,7 +121,7 @@ describe('ChatArea Component & Citation Integration', () => {
       render(<ChatArea />);
     });
 
-    const input = screen.getByPlaceholderText(/pergunte algo sobre seus documentos/i);
+    const input = screen.getByPlaceholderText(/pergunte algo sobre os documentos/i);
     const sendButton = screen.getByRole('button', { name: /enviar/i });
 
     await act(async () => {
@@ -114,5 +135,49 @@ describe('ChatArea Component & Citation Integration', () => {
     // Verifica se a resposta da IA e o badge de citação apareceram
     expect(await screen.findByText(/resposta simulada do RAG com Gemini/i)).toBeInTheDocument();
     expect(await screen.findByText('manual.pdf')).toBeInTheDocument();
+  });
+
+  it('deve exibir overlay visual ao arrastar arquivo PDF sobre a tela e processar o drop', async () => {
+    (global.fetch as jest.Mock).mockImplementation((url: string) => {
+      if (url.includes('/upload')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ success: true, total_processed: 1 }),
+        });
+      }
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({ id: 'conv-1', title: 'Conversa', files: [], messages: [] }),
+      });
+    });
+
+    const { container } = render(<ChatArea />);
+
+    const mainContainer = container.firstChild as HTMLElement;
+
+    // Simula evento dragEnter
+    await act(async () => {
+      fireEvent.dragEnter(mainContainer, {
+        dataTransfer: {
+          items: [{ kind: 'file', type: 'application/pdf' }],
+        },
+      });
+    });
+
+    expect(screen.getByTestId('drag-drop-overlay')).toBeInTheDocument();
+    expect(screen.getByText(/solte seus arquivos pdf aqui/i)).toBeInTheDocument();
+
+    // Simula evento drop com arquivo PDF
+    const fakeFile = new File(['fake-content'], 'contrato.pdf', { type: 'application/pdf' });
+    await act(async () => {
+      fireEvent.drop(mainContainer, {
+        dataTransfer: {
+          files: [fakeFile],
+        },
+      });
+    });
+
+    // O overlay deve sumir após o drop
+    expect(screen.queryByTestId('drag-drop-overlay')).not.toBeInTheDocument();
   });
 });
