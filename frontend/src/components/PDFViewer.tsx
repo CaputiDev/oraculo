@@ -167,9 +167,9 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({
                 className="bg-slate-800 text-slate-200 text-xs rounded-lg border border-slate-700 px-2.5 py-1.5 font-medium truncate focus:ring-1 focus:ring-indigo-500 focus:outline-none w-full"
               >
                 <option value="">📁 Explorador de documentos...</option>
-                {documents.map((doc) => (
+                {documents.map((doc, idx) => (
                   <option key={doc} value={doc}>
-                    {doc}
+                    {idx + 1} - {doc}
                   </option>
                 ))}
               </select>

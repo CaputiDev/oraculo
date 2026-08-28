@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { ChatMessage } from '../types';
 import { MessageCitations } from './MessageCitations';
+import { FormattedMessage } from './FormattedMessage';
 import { useViewerStore } from '../store/useViewerStore';
 import { useConversationStore } from '../store/useConversationStore';
 
@@ -349,9 +350,17 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                       : 'bg-red-950/50 text-red-200 border border-red-800/50'
                   }`}
                 >
-                  <p className="whitespace-pre-wrap">{msg.content}</p>
+                  {msg.role === 'assistant' ? (
+                    <FormattedMessage 
+                      content={msg.content} 
+                      citations={msg.citations} 
+                      documents={documents} 
+                    />
+                  ) : (
+                    <p className="whitespace-pre-wrap">{msg.content}</p>
+                  )}
 
-                  {/* Citations Box (Recolhido automaticamente se > 2) */}
+                  {/* Citations Box (Recolhido por padrão) */}
                   {msg.citations && msg.citations.length > 0 && (
                     <MessageCitations citations={msg.citations} />
                   )}

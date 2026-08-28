@@ -63,8 +63,15 @@ describe('ChatArea Component & Citation Integration', () => {
       render(<ChatArea initialMessages={initialMessages} />);
     });
 
-    // Verifica se a citação está na tela
-    const citationButton = screen.getByTestId('citation-badge');
+    // Expande o footer de fontes que inicia recolhido por padrão
+    const toggleButton = screen.getByTestId('toggle-citations-button');
+    expect(toggleButton).toBeInTheDocument();
+    await act(async () => {
+      fireEvent.click(toggleButton);
+    });
+
+    // Verifica se a citação está na tela com o número do documento
+    const citationButton = screen.getByTestId('citation-balloon-btn-1');
     expect(citationButton).toBeInTheDocument();
     expect(citationButton).toHaveTextContent('especificacao.pdf');
     expect(citationButton).toHaveTextContent('pág. 4');
@@ -132,8 +139,13 @@ describe('ChatArea Component & Citation Integration', () => {
     // Verifica se a pergunta do usuário apareceu
     expect(await screen.findByText('Como configurar a rede?')).toBeInTheDocument();
 
-    // Verifica se a resposta da IA e o badge de citação apareceram
+    // Verifica se a resposta da IA e o botão de fontes apareceram
     expect(await screen.findByText(/resposta simulada do RAG com Gemini/i)).toBeInTheDocument();
+    const toggleFooterBtn = await screen.findByTestId('toggle-citations-button');
+    expect(toggleFooterBtn).toBeInTheDocument();
+
+    // Expande o footer de fontes para verificar os balões
+    fireEvent.click(toggleFooterBtn);
     expect(await screen.findByText('manual.pdf')).toBeInTheDocument();
   });
 

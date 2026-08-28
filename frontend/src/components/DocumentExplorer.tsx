@@ -469,12 +469,15 @@ export const DocumentExplorer: React.FC<DocumentExplorerProps> = ({
                   className="group p-3.5 bg-slate-900/80 hover:bg-slate-900 border border-slate-800 hover:border-indigo-500/60 rounded-xl transition-all shadow-sm flex flex-col justify-between cursor-pointer space-y-3 hover:shadow-indigo-950/20"
                 >
                   <div className="flex items-start gap-3">
-                    <div className={`p-2.5 rounded-xl flex-shrink-0 ${
+                    <div className={`p-2.5 rounded-xl flex-shrink-0 relative ${
                       doc.isPdf 
                         ? 'bg-red-950/40 border border-red-800/40 text-red-400 group-hover:bg-red-900/40' 
                         : 'bg-indigo-950/40 border border-indigo-700/40 text-indigo-400 group-hover:bg-indigo-900/40'
                     }`}>
                       {doc.isPdf ? <FileText className="w-5 h-5" /> : <FileCode className="w-5 h-5" />}
+                      <span className="absolute -top-1.5 -right-1.5 bg-indigo-600 text-white font-mono font-bold text-[10px] px-1.5 py-0.2 rounded-full border border-indigo-400/40 shadow-sm min-w-[18px] text-center">
+                        {doc.originalIndex + 1}
+                      </span>
                     </div>
 
                     <div className="min-w-0 flex-1">
