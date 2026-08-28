@@ -2,7 +2,6 @@ import io
 import re
 from typing import List, Optional
 from pydantic import BaseModel, Field
-from pypdf import PdfReader
 
 
 class DocumentChunk(BaseModel):
@@ -15,9 +14,9 @@ class DocumentChunk(BaseModel):
 
 class PDFParser:
     """
-    Parser responsável por extrair texto e estruturar documentos utilizando Recursive Character Chunking
-    (divisão hierárquica por parágrafos, frases e palavras) mantendo metadados estritos de arquivo,
-    número de página e identificador único de bloco.
+    Parser de alta performance utilizando PyMuPDF (fitz) com fallback para PyPDF,
+    integrado a Recursive Character Chunking (divisão hierárquica por parágrafos,
+    frases e palavras) mantendo metadados estritos de arquivo, número de página e chunk_id.
     """
 
     def __init__(
@@ -30,21 +29,59 @@ class PDFParser:
         self.chunk_overlap = chunk_overlap
         self.separators = separators or ["\n\n", "\n", ". ", "? ", "! ", "; ", " ", ""]
 
-    def parse_pdf_bytes(self, file_bytes: bytes, file_name: str) -> List[DocumentChunk]:
+    def _extract_pages_pymupdf(self, file_bytes: bytes) -> List[tuple[int, str]]:
         """
-        Lê bytes de um arquivo PDF e extrai blocos de texto associados a cada página.
+        Extrai texto de cada página utilizando PyMuPDF (C engine - 10x mais rápido).
         """
+        import fitz
+        doc = fitz.open(stream=file_bytes, filetype="pdf")
+        pages_content: List[tuple[int, str]] = []
+
+        for page_idx in range(len(doc)):
+            page = doc[page_idx]
+            text = page.get_text("text")
+            page_number = page_idx + 1
+            if text and text.strip():
+                pages_content.append((page_number, text.strip()))
+
+        doc.close()
+        return pages_content
+
+    def _extract_pages_pypdf(self, file_bytes: bytes) -> List[tuple[int, str]]:
+        """
+        Fallback para pypdf caso PyMuPDF encontre algum erro de streaming.
+        """
+        from pypdf import PdfReader
         reader = PdfReader(io.BytesIO(file_bytes))
-        chunks: List[DocumentChunk] = []
+        pages_content: List[tuple[int, str]] = []
 
         for page_idx, page in enumerate(reader.pages):
             page_number = page_idx + 1
             text = page.extract_text()
-            if not text or not text.strip():
-                continue
+            if text and text.strip():
+                pages_content.append((page_number, text.strip()))
 
+        return pages_content
+
+    def parse_pdf_bytes(self, file_bytes: bytes, file_name: str) -> List[DocumentChunk]:
+        """
+        Lê bytes de um arquivo PDF com motor PyMuPDF e segmenta recursivamente por página.
+        """
+        pages_content: List[tuple[int, str]] = []
+
+        try:
+            pages_content = self._extract_pages_pymupdf(file_bytes)
+        except Exception:
+            # Fallback seguro para pypdf
+            try:
+                pages_content = self._extract_pages_pypdf(file_bytes)
+            except Exception as e:
+                raise RuntimeError(f"Erro ao extrair conteúdo do PDF '{file_name}': {str(e)}")
+
+        chunks: List[DocumentChunk] = []
+        for page_number, text in pages_content:
             page_chunks = self._recursive_chunk_page(
-                text=text.strip(),
+                text=text,
                 file_name=file_name,
                 page_number=page_number
             )
@@ -100,11 +137,9 @@ class PDFParser:
                     other_splits = self._recursive_split(s, new_separators)
                     good_splits.extend(other_splits)
                 else:
-                    # Fallback final se não houver mais separadores
                     for idx in range(0, len(s), self.chunk_size - self.chunk_overlap):
                         good_splits.append(s[idx:idx + self.chunk_size])
 
-        # Agrupa os splits menores respeitando o chunk_size e overlap
         current_doc: List[str] = []
         total_len = 0
 
@@ -121,7 +156,6 @@ class PDFParser:
                     if merged:
                         final_chunks.append(merged)
                     
-                    # Aplica overlap mantendo elementos finais
                     while current_doc and total_len > self.chunk_overlap:
                         removed = current_doc.pop(0)
                         total_len -= len(removed) + (sep_len if current_doc else 0)
