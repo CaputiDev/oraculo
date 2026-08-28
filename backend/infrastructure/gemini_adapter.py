@@ -23,7 +23,7 @@ Regras fundamentais:
 1. Se a informação constar no contexto, responda de forma direta, clara e cite os trechos relevantes.
 2. Se a informação NÃO estiver nos documentos, declare explicitamente: "Não encontrei informações sobre isso nos documentos fornecidos."
 3. NUNCA invente informações fora do contexto fornecido.
-4. Responda SEMPRE em JSON válido com o formato:
+4. Responda SEMPRE em JSON válido no esquema:
 {
   "answer": "Sua resposta com citações inline [Fonte: arquivo.pdf, pág. X].",
   "citations": [
@@ -40,7 +40,7 @@ Regras fundamentais:
 class GeminiAdapter:
     """
     Adaptador de infraestrutura para geração de respostas com Gemini AI com alta performance,
-    JSON nativo estruturado e controle de timeout.
+    JSON nativo estruturado e modelos otimizados para baixa latência.
     """
 
     def __init__(
@@ -50,9 +50,13 @@ class GeminiAdapter:
         temperature: float = 0.1
     ):
         self.api_key = api_key or os.getenv("GOOGLE_API_KEY")
-        self.model_name = model_name or os.getenv("LLM_MODEL", "gemini-3.5-flash")
+        self.model_name = (
+            model_name 
+            or os.getenv("GEMINI_MODEL") 
+            or os.getenv("LLM_MODEL") 
+            or "gemini-3.1-flash-lite"
+        )
         self.temperature = temperature
-        self._cached_model = None
 
         if self.api_key:
             try:
@@ -91,10 +95,11 @@ class GeminiAdapter:
 
         candidate_models = [
             self.model_name,
+            "gemini-3.1-flash-lite",
+            "gemini-3.5-flash-lite",
+            "gemini-flash-latest",
+            "gemini-3.6-flash",
             "gemini-3.5-flash",
-            "gemini-3.7-flash",
-            "gemma-4-31b-it",
-            "gemma-4-26b-a4b-it",
         ]
         candidate_models = list(dict.fromkeys(candidate_models))
 
@@ -115,13 +120,12 @@ class GeminiAdapter:
                     )
                     response = model.generate_content(
                         user_content,
-                        request_options={"timeout": 15.0}
+                        request_options={"timeout": 40.0}
                     )
                     self.model_name = model_candidate
                     break
                 except Exception as e:
                     last_err = e
-                    # Tenta o próximo modelo em caso de erro/rate limit
                     continue
 
             if not response:
@@ -129,7 +133,6 @@ class GeminiAdapter:
 
             raw_text = response.text.strip()
             
-            # Limpa possíveis delimitadores caso o backend retorne
             if raw_text.startswith("```json"):
                 raw_text = raw_text[7:]
             if raw_text.startswith("```"):
@@ -166,9 +169,11 @@ class GeminiAdapter:
             )
 
         except Exception as e:
-            # Fallback seguro para manter a estabilidade do chat
+            # Fallback limpo com nomes de arquivos desduplicados
+            unique_files = list(dict.fromkeys([c.file_name for c in context_chunks]))
+            files_str = ", ".join(unique_files) if unique_files else "nenhum"
             fallback_answer = (
-                f"Com base nos documentos consultados ({', '.join([c.file_name for c in context_chunks]) or 'nenhum'}):\n\n"
+                f"Com base nos documentos consultados ({files_str}):\n\n"
                 f"Não foi possível processar a resposta formatada pelo LLM ({str(e)})."
             )
             fallback_citations = [
