@@ -5,8 +5,8 @@ from infrastructure.pdf_parser import DocumentChunk
 
 class ChromaDBAdapter:
     """
-    Adaptador de infraestrutura para o banco vetorial ChromaDB com suporte a persistência local
-    e particionamento/filtro por conversation_id.
+    Adaptador de infraestrutura para o banco vetorial ChromaDB com suporte a persistência local,
+    particionamento por conversation_id e cache em memória de embeddings de busca.
     """
 
     def __init__(
@@ -22,6 +22,7 @@ class ChromaDBAdapter:
             "EMBEDDING_MODEL", "models/gemini-embedding-001"
         )
         self.api_key = api_key or os.getenv("GOOGLE_API_KEY")
+        self._query_cache: Dict[str, List[float]] = {}
 
         os.makedirs(self.persist_directory, exist_ok=True)
         try:
@@ -34,6 +35,13 @@ class ChromaDBAdapter:
         except ImportError:
             self.client = None
             self.collection = None
+
+        if self.api_key:
+            try:
+                import google.generativeai as genai
+                genai.configure(api_key=self.api_key)
+            except Exception:
+                pass
 
     def _get_embedding(self, text: str) -> List[float]:
         """
@@ -49,9 +57,6 @@ class ChromaDBAdapter:
 
         try:
             import google.generativeai as genai
-            if self.api_key:
-                genai.configure(api_key=self.api_key)
-
             last_error = None
             for model_name in candidate_models:
                 try:
@@ -71,6 +76,13 @@ class ChromaDBAdapter:
             raise RuntimeError(f"Erro ao gerar embeddings com Gemini: {str(e)}")
 
     def _get_query_embedding(self, query: str) -> List[float]:
+        """
+        Recupera embedding de busca com cache em memória LRU para latência zero em termos recorrentes.
+        """
+        clean_query = query.strip()
+        if clean_query in self._query_cache:
+            return self._query_cache[clean_query]
+
         candidate_models = [
             self.embedding_model_name,
             "models/gemini-embedding-001",
@@ -81,19 +93,23 @@ class ChromaDBAdapter:
 
         try:
             import google.generativeai as genai
-            if self.api_key:
-                genai.configure(api_key=self.api_key)
-
             last_error = None
             for model_name in candidate_models:
                 try:
                     result = genai.embed_content(
                         model=model_name,
-                        content=query,
+                        content=clean_query,
                         task_type="retrieval_query"
                     )
                     self.embedding_model_name = model_name
-                    return result["embedding"]
+                    emb = result["embedding"]
+
+                    # Mantém o cache limitado a 256 queries mais recentes
+                    if len(self._query_cache) > 256:
+                        self._query_cache.pop(next(iter(self._query_cache)))
+                    self._query_cache[clean_query] = emb
+
+                    return emb
                 except Exception as e:
                     last_error = e
                     continue
@@ -137,7 +153,7 @@ class ChromaDBAdapter:
         self,
         query: str,
         conversation_id: Optional[str] = None,
-        k: int = 4
+        k: int = 3
     ) -> List[DocumentChunk]:
         """
         Executa busca semântica filtrando exclusivamente pelos chunks da conversa ativa.

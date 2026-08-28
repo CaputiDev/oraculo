@@ -1,6 +1,6 @@
 import os
 import json
-from typing import List, Dict, Any, Optional
+from typing import List, Optional
 from pydantic import BaseModel, Field
 from infrastructure.pdf_parser import DocumentChunk
 
@@ -8,7 +8,7 @@ from infrastructure.pdf_parser import DocumentChunk
 class Citation(BaseModel):
     file_name: str
     page_number: int
-    snippet: str
+    snippet: Optional[str] = None
 
 
 class RAGResponse(BaseModel):
@@ -16,69 +16,83 @@ class RAGResponse(BaseModel):
     citations: List[Citation] = Field(default_factory=list)
 
 
+SYSTEM_RAG_PROMPT = """Você é o Oráculo, um assistente corporativo de IA de alta precisão.
+Sua tarefa é responder à pergunta do usuário baseando-se ESTRITAMENTE nos fragmentos de documentos fornecidos.
+
+Regras fundamentais:
+1. Se a informação constar no contexto, responda de forma direta, clara e cite os trechos relevantes.
+2. Se a informação NÃO estiver nos documentos, declare explicitamente: "Não encontrei informações sobre isso nos documentos fornecidos."
+3. NUNCA invente informações fora do contexto fornecido.
+4. Responda SEMPRE em JSON válido com o formato:
+{
+  "answer": "Sua resposta com citações inline [Fonte: arquivo.pdf, pág. X].",
+  "citations": [
+    {
+      "file_name": "nome_do_arquivo.pdf",
+      "page_number": 1,
+      "snippet": "trecho exato ou resumo do fato citado"
+    }
+  ]
+}
+"""
+
+
 class GeminiAdapter:
     """
-    Adaptador de IA para o modelo Google Gemini com suporte a respostas estruturadas com citações
-    e fallback dinâmico entre versões ativas (ex: gemini-3.7-flash, gemini-3.5-flash).
+    Adaptador de infraestrutura para geração de respostas com Gemini AI com alta performance,
+    JSON nativo estruturado e controle de timeout.
     """
 
     def __init__(
         self,
-        model_name: Optional[str] = None,
         api_key: Optional[str] = None,
-        temperature: float = 0.2
+        model_name: Optional[str] = None,
+        temperature: float = 0.1
     ):
-        self.model_name = model_name or os.getenv("GEMINI_MODEL", "gemini-3.7-flash")
         self.api_key = api_key or os.getenv("GOOGLE_API_KEY")
+        self.model_name = model_name or os.getenv("LLM_MODEL", "gemini-3.5-flash")
         self.temperature = temperature
+        self._cached_model = None
 
-    def generate_rag_answer(self, query: str, context_chunks: List[DocumentChunk]) -> RAGResponse:
-        """
-        Gera uma resposta fundamentada no contexto recuperado com citações estritas.
-        """
-        if not context_chunks:
-            return RAGResponse(
-                answer="Não encontrei informações relevantes nos documentos fornecidos para responder à sua pergunta.",
-                citations=[]
+        if self.api_key:
+            try:
+                import google.generativeai as genai
+                genai.configure(api_key=self.api_key)
+            except Exception:
+                pass
+
+    def _format_context(self, chunks: List[DocumentChunk]) -> str:
+        if not chunks:
+            return "Nenhum documento disponível no momento."
+        
+        context_parts = []
+        for i, chunk in enumerate(chunks, 1):
+            context_parts.append(
+                f"--- DOCUMENTO [{i}]: {chunk.file_name} (Página {chunk.page_number}) ---\n"
+                f"{chunk.content}\n"
             )
+        return "\n".join(context_parts)
 
-        # Monta o bloco de contexto enriquecido com os metadados de cada fonte
-        context_blocks = []
-        for i, chunk in enumerate(context_chunks):
-            context_blocks.append(
-                f"--- Bloco #{i+1} [Arquivo: {chunk.file_name} | Página: {chunk.page_number}] ---\n{chunk.content}"
-            )
-        context_text = "\n\n".join(context_blocks)
+    def generate_rag_answer(
+        self,
+        query: str,
+        context_chunks: List[DocumentChunk]
+    ) -> RAGResponse:
+        """
+        Gera resposta fundamentada utilizando Gemini em modo JSON nativo ultra-rápido.
+        """
+        context_text = self._format_context(context_chunks)
 
-        prompt = f"""Você é o assistente inteligente Oráculo. Sua função é responder a perguntas de usuários exclusivamente com base nos documentos e trechos fornecidos no contexto.
-
-REGRAS OBRIGATÓRIAS:
-1. Responda apenas com informações presentes no contexto. Se a resposta não estiver no contexto, declare educadamente que a informação não foi encontrada.
-2. Sempre que citar uma informação, indique explicitamente a fonte com o nome do arquivo e a página correspondente.
-3. Retorne sua resposta em formato JSON estrito com o seguinte esquema:
-{{
-  "answer": "Sua resposta completa e formatada em Markdown, incluindo marcadores de citação interativa como [Fonte: nome_do_arquivo.pdf, pág. X]",
-  "citations": [
-    {{
-      "file_name": "nome_do_arquivo.pdf",
-      "page_number": 1,
-      "snippet": "Trecho exato relevante de até 150 caracteres que fundamenta a citação"
-    }}
-  ]
-}}
-
-CONTEXTO DOS DOCUMENTOS:
-{context_text}
-
-PERGUNTA DO USUÁRIO:
-{query}
-
-Responda SOMENTE o JSON válido, sem blocos markdown adicionais como ```json."""
+        user_content = (
+            f"DOCUMENTOS DE CONTEXTO:\n{context_text}\n\n"
+            f"PERGUNTA DO USUÁRIO:\n{query}\n\n"
+            f"Responda estritamente em JSON no schema estipulado."
+        )
 
         candidate_models = [
             self.model_name,
-            "gemini-3.7-flash",
             "gemini-3.5-flash",
+            "gemini-3.7-flash",
             "gemma-4-31b-it",
             "gemma-4-26b-a4b-it",
         ]
@@ -86,22 +100,28 @@ Responda SOMENTE o JSON válido, sem blocos markdown adicionais como ```json."""
 
         try:
             import google.generativeai as genai
-            if self.api_key:
-                genai.configure(api_key=self.api_key)
-
             response = None
             last_err = None
+
             for model_candidate in candidate_models:
                 try:
                     model = genai.GenerativeModel(
                         model_name=model_candidate,
-                        generation_config={"temperature": self.temperature}
+                        system_instruction=SYSTEM_RAG_PROMPT,
+                        generation_config={
+                            "temperature": self.temperature,
+                            "response_mime_type": "application/json"
+                        }
                     )
-                    response = model.generate_content(prompt)
+                    response = model.generate_content(
+                        user_content,
+                        request_options={"timeout": 15.0}
+                    )
                     self.model_name = model_candidate
                     break
                 except Exception as e:
                     last_err = e
+                    # Tenta o próximo modelo em caso de erro/rate limit
                     continue
 
             if not response:
@@ -109,37 +129,57 @@ Responda SOMENTE o JSON válido, sem blocos markdown adicionais como ```json."""
 
             raw_text = response.text.strip()
             
-            # Limpa possíveis blocos ```json
+            # Limpa possíveis delimitadores caso o backend retorne
             if raw_text.startswith("```json"):
                 raw_text = raw_text[7:]
+            if raw_text.startswith("```"):
+                raw_text = raw_text[3:]
             if raw_text.endswith("```"):
                 raw_text = raw_text[:-3]
             raw_text = raw_text.strip()
 
-            parsed = json.loads(raw_text)
-            citations = [
-                Citation(
-                    file_name=c.get("file_name", "Desconhecido"),
-                    page_number=int(c.get("page_number", 1)),
-                    snippet=c.get("snippet", "")
-                )
-                for c in parsed.get("citations", [])
-            ]
+            parsed_data = json.loads(raw_text)
+
+            citations_raw = parsed_data.get("citations", [])
+            citations = []
+            for cit in citations_raw:
+                if isinstance(cit, dict):
+                    citations.append(
+                        Citation(
+                            file_name=cit.get("file_name", "documento"),
+                            page_number=int(cit.get("page_number", 1)),
+                            snippet=cit.get("snippet", "")
+                        )
+                    )
+                elif isinstance(cit, str) and context_chunks:
+                    citations.append(
+                        Citation(
+                            file_name=context_chunks[0].file_name,
+                            page_number=context_chunks[0].page_number,
+                            snippet=cit
+                        )
+                    )
+
             return RAGResponse(
-                answer=parsed.get("answer", ""),
+                answer=parsed_data.get("answer", "Não foi possível gerar a resposta."),
                 citations=citations
             )
+
         except Exception as e:
-            # Fallback com citações extraídas diretamente dos chunks caso haja falha de formatação JSON do LLM
-            citations = [
+            # Fallback seguro para manter a estabilidade do chat
+            fallback_answer = (
+                f"Com base nos documentos consultados ({', '.join([c.file_name for c in context_chunks]) or 'nenhum'}):\n\n"
+                f"Não foi possível processar a resposta formatada pelo LLM ({str(e)})."
+            )
+            fallback_citations = [
                 Citation(
-                    file_name=chunk.file_name,
-                    page_number=chunk.page_number,
-                    snippet=chunk.content[:120] + "..." if len(chunk.content) > 120 else chunk.content
+                    file_name=c.file_name,
+                    page_number=c.page_number,
+                    snippet=c.content[:150] + "..." if len(c.content) > 150 else c.content
                 )
-                for chunk in context_chunks[:2]
+                for c in context_chunks
             ]
             return RAGResponse(
-                answer=f"Com base nos documentos consultados ({', '.join(set(c.file_name for c in context_chunks))}):\n\n{str(e)}",
-                citations=citations
+                answer=fallback_answer,
+                citations=fallback_citations
             )
