@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { ChatMessage, Citation } from '../types';
 import { CitationBadge } from './CitationBadge';
+import { MessageCitations } from './MessageCitations';
 import { useViewerStore } from '../store/useViewerStore';
 import { useConversationStore } from '../store/useConversationStore';
 
@@ -461,24 +462,9 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                     >
                       <p className="whitespace-pre-wrap">{msg.content}</p>
 
-                      {/* Citations Box */}
+                      {/* Citations Box (Recolhido automaticamente se > 2) */}
                       {msg.citations && msg.citations.length > 0 && (
-                        <div className="mt-3 pt-2 border-t border-slate-700/60">
-                          <div className="text-[10px] sm:text-[11px] font-semibold text-indigo-300 uppercase tracking-wider mb-1 flex items-center gap-1">
-                            <FileText className="w-3 h-3" />
-                            Fontes Citadas (Clique para visualizar):
-                          </div>
-                          <div className="flex flex-wrap gap-1.5">
-                            {msg.citations.map((cit, idx) => (
-                              <CitationBadge
-                                key={`${cit.file_name}-${cit.page_number}-${idx}`}
-                                fileName={cit.file_name}
-                                pageNumber={cit.page_number}
-                                snippet={cit.snippet}
-                              />
-                            ))}
-                          </div>
-                        </div>
+                        <MessageCitations citations={msg.citations} />
                       )}
                     </div>
                     <span className="text-[10px] text-slate-400 mt-1 px-1">
