@@ -6,7 +6,7 @@ from infrastructure.pdf_parser import DocumentChunk
 class ChromaDBAdapter:
     """
     Adaptador de infraestrutura para o banco vetorial ChromaDB com suporte a persistência local,
-    particionamento por conversation_id e cache em memória de embeddings de busca.
+    particionamento por conversation_id, cache em memória e geração de Batch Embeddings (em lote).
     """
 
     def __init__(
@@ -45,8 +45,20 @@ class ChromaDBAdapter:
 
     def _get_embedding(self, text: str) -> List[float]:
         """
-        Gera embeddings utilizando Google Generative AI com fallback dinâmico de modelo.
+        Gera embedding para um único texto (fallback individual).
         """
+        batch_res = self._get_batch_embeddings([text])
+        if batch_res:
+            return batch_res[0]
+        raise RuntimeError("Falha ao gerar embedding individual.")
+
+    def _get_batch_embeddings(self, texts: List[str], batch_size: int = 50) -> List[List[float]]:
+        """
+        Gera embeddings em lote (Batch Embeddings) de alta performance, agrupando textos em requisições únicas.
+        """
+        if not texts:
+            return []
+
         candidate_models = [
             self.embedding_model_name,
             "models/gemini-embedding-001",
@@ -55,25 +67,45 @@ class ChromaDBAdapter:
         ]
         candidate_models = list(dict.fromkeys(candidate_models))
 
+        all_embeddings: List[List[float]] = []
+
         try:
             import google.generativeai as genai
-            last_error = None
-            for model_name in candidate_models:
-                try:
-                    result = genai.embed_content(
-                        model=model_name,
-                        content=text,
-                        task_type="retrieval_document"
-                    )
-                    self.embedding_model_name = model_name
-                    return result["embedding"]
-                except Exception as e:
-                    last_error = e
-                    continue
+            
+            # Processa em lotes de até batch_size
+            for i in range(0, len(texts), batch_size):
+                chunk_batch = texts[i:i + batch_size]
+                last_error = None
+                batch_success = False
 
-            raise last_error or RuntimeError("Nenhum modelo de embedding respondeu com sucesso.")
+                for model_name in candidate_models:
+                    try:
+                        result = genai.embed_content(
+                            model=model_name,
+                            content=chunk_batch,
+                            task_type="retrieval_document"
+                        )
+                        self.embedding_model_name = model_name
+                        raw_emb = result["embedding"]
+
+                        # Se for lote de 1 elemento, a API pode retornar list[float] ou list[list[float]]
+                        if len(chunk_batch) == 1 and raw_emb and isinstance(raw_emb[0], (int, float)):
+                            all_embeddings.append(raw_emb)
+                        else:
+                            all_embeddings.extend(raw_emb)
+
+                        batch_success = True
+                        break
+                    except Exception as e:
+                        last_error = e
+                        continue
+
+                if not batch_success:
+                    raise last_error or RuntimeError("Falha ao gerar embeddings em lote.")
+
+            return all_embeddings
         except Exception as e:
-            raise RuntimeError(f"Erro ao gerar embeddings com Gemini: {str(e)}")
+            raise RuntimeError(f"Erro no processamento de Batch Embeddings com Gemini: {str(e)}")
 
     def _get_query_embedding(self, query: str) -> List[float]:
         """
@@ -120,7 +152,8 @@ class ChromaDBAdapter:
 
     def add_chunks(self, chunks: List[DocumentChunk], conversation_id: str = "default") -> int:
         """
-        Adiciona lista de chunks de documentos ao ChromaDB associados a uma conversation_id.
+        Adiciona lista de chunks de documentos ao ChromaDB associados a uma conversation_id
+        utilizando Batch Embeddings de alta performance.
         """
         if not chunks:
             return 0
@@ -139,7 +172,8 @@ class ChromaDBAdapter:
             for chunk in chunks
         ]
 
-        embeddings = [self._get_embedding(doc) for doc in documents]
+        # Geração de embeddings em lote (1 única chamada para dezenas de chunks)
+        embeddings = self._get_batch_embeddings(documents, batch_size=50)
 
         self.collection.upsert(
             ids=ids,

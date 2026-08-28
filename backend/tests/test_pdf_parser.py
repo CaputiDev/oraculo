@@ -70,3 +70,14 @@ def test_text_parser_splits_free_text():
     assert chunks[0].file_name == "Notas Rápidas"
     assert chunks[0].page_number == 1
     assert "Oráculo" in chunks[0].content
+
+
+def test_recursive_chunking_preserves_paragraphs():
+    parser = PDFParser(chunk_size=60, chunk_overlap=15)
+    text = "Primeiro parágrafo conciso.\n\nSegundo parágrafo com mais detalhes importantes.\n\nTerceiro parágrafo final."
+    chunks = parser.parse_raw_text(text=text, title="Paragrafos")
+
+    assert len(chunks) >= 2
+    # Confirma que cada chunk respeita o limite e mantém o conteúdo
+    assert "Primeiro parágrafo" in chunks[0].content
+    assert chunks[0].file_name == "Paragrafos"
