@@ -1,24 +1,17 @@
 'use client';
 
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { 
   Send, 
-  Upload, 
-  FileText, 
-  Sparkles, 
   Loader2, 
-  Plus, 
   Database, 
-  CheckCircle2, 
-  Menu, 
   PanelLeft, 
   PanelRight, 
   BookOpen,
   FileUp,
   AlertCircle
 } from 'lucide-react';
-import { ChatMessage, Citation } from '../types';
-import { CitationBadge } from './CitationBadge';
+import { ChatMessage } from '../types';
 import { MessageCitations } from './MessageCitations';
 import { useViewerStore } from '../store/useViewerStore';
 import { useConversationStore } from '../store/useConversationStore';
@@ -48,19 +41,13 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
 
   const [inputQuery, setInputQuery] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState<'chat' | 'upload' | 'text'>('chat');
   
   // Drag & drop states
   const [isDraggingOver, setIsDraggingOver] = useState(false);
   const [dragCounter, setDragCounter] = useState(0);
-
-  // Free text upload state
-  const [freeText, setFreeText] = useState('');
-  const [freeTextTitle, setFreeTextTitle] = useState('');
   const [isUploading, setIsUploading] = useState(false);
   const [uploadFeedback, setUploadFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const messages: ChatMessage[] = activeConversation?.messages || initialMessages;
@@ -182,7 +169,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
       if (data.success) {
         setUploadFeedback({
           type: 'success',
-          message: `Sucesso! ${data.total_processed} arquivo(s) PDF indexado(s) via Batch Embedding nesta conversa.`,
+          message: `Sucesso! ${data.total_processed} arquivo(s) PDF indexado(s) nesta conversa.`,
         });
         for (let i = 0; i < validFiles.length; i++) {
           addFileToActive(validFiles[i].name);
@@ -203,17 +190,10 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
       setIsUploading(false);
       setIsDraggingOver(false);
       setDragCounter(0);
-      if (fileInputRef.current) fileInputRef.current.value = '';
     }
   };
 
-  const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files) {
-      uploadFiles(e.target.files);
-    }
-  };
-
-  // Drag & Drop handlers globais e da zona de drop
+  // Drag & Drop handlers globais
   const handleDragEnter = (e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -253,57 +233,6 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
     }
   };
 
-  const handleTextUpload = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!freeText.trim() || isUploading) return;
-
-    let targetConvId = activeConversationId;
-    if (!targetConvId) {
-      targetConvId = await createConversation(freeTextTitle || 'Texto Livre', apiBaseUrl);
-    }
-
-    setIsUploading(true);
-    setUploadFeedback(null);
-
-    const docTitle = freeTextTitle.trim() || 'Texto Livre';
-
-    try {
-      const res = await fetch(`${apiBaseUrl}/conversations/${encodeURIComponent(targetConvId)}/upload-text`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          text: freeText.trim(),
-          title: docTitle,
-          conversation_id: targetConvId,
-        }),
-      });
-
-      const data = await res.json();
-      if (data.success) {
-        setUploadFeedback({
-          type: 'success',
-          message: `Texto '${data.file_name}' indexado com sucesso nesta conversa!`,
-        });
-        addFileToActive(docTitle);
-        setFreeText('');
-        setFreeTextTitle('');
-        fetchConversations(apiBaseUrl);
-      } else {
-        setUploadFeedback({
-          type: 'error',
-          message: 'Erro ao indexar texto.',
-        });
-      }
-    } catch (err: any) {
-      setUploadFeedback({
-        type: 'error',
-        message: `Erro: ${err.message}`,
-      });
-    } finally {
-      setIsUploading(false);
-    }
-  };
-
   const docCount = activeConversation?.files?.length ?? documents?.length ?? 0;
 
   return (
@@ -327,14 +256,14 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
             Solte seus arquivos PDF aqui
           </h3>
           <p className="text-sm text-indigo-200 max-w-sm">
-            Eles serão processados em alta velocidade com PyMuPDF e Batch Embeddings nesta conversa.
+            Eles serão indexados em alta velocidade exclusivamente nesta conversa.
           </p>
         </div>
       )}
 
-      {/* Header & Quick Action Buttons */}
-      <div className="flex items-center justify-between px-3 sm:px-4 py-2.5 sm:py-3 border-b border-slate-800 bg-slate-950/70 backdrop-blur-md gap-2 flex-wrap sm:flex-nowrap">
-        {/* Left: Sidebar Toggle & Title */}
+      {/* Header Limpo: Botão Histórico + Título da Conversa + Botão Documentos */}
+      <div className="flex items-center justify-between px-3 sm:px-4 py-2.5 sm:py-3 border-b border-slate-800 bg-slate-950/70 backdrop-blur-md gap-2">
+        {/* Esquerda: Toggle Sidebar e Título */}
         <div className="flex items-center gap-2 min-w-0 flex-1">
           <button
             onClick={toggleSidebar}
@@ -359,45 +288,8 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
           </div>
         </div>
 
-        {/* Center/Right: Tabs + Document Viewer Toggle */}
+        {/* Direita: Botão de Alternar Visualizador de Documentos */}
         <div className="flex items-center gap-1.5 sm:gap-2">
-          {/* Navigation Tabs */}
-          <div className="flex bg-slate-800/90 p-0.5 rounded-lg border border-slate-700/80 text-[11px] sm:text-xs">
-            <button
-              onClick={() => setActiveTab('chat')}
-              className={`px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-md font-medium transition-all ${
-                activeTab === 'chat'
-                  ? 'bg-indigo-600 text-white shadow-sm'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              Chat
-            </button>
-            <button
-              onClick={() => setActiveTab('upload')}
-              className={`px-2 sm:px-2.5 py-1 sm:py-1.5 rounded-md font-medium transition-all flex items-center gap-1 ${
-                activeTab === 'upload'
-                  ? 'bg-indigo-600 text-white shadow-sm'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              <Upload className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
-              <span className="hidden xs:inline">Upload PDF</span>
-            </button>
-            <button
-              onClick={() => setActiveTab('text')}
-              className={`px-2 sm:px-2.5 py-1 sm:py-1.5 rounded-md font-medium transition-all flex items-center gap-1 ${
-                activeTab === 'text'
-                  ? 'bg-indigo-600 text-white shadow-sm'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              <FileText className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
-              <span className="hidden xs:inline">Texto</span>
-            </button>
-          </div>
-
-          {/* Right: Document Viewer Toggle Button */}
           <button
             onClick={toggleViewer}
             className={`p-1.5 sm:p-2 rounded-lg border transition-all flex items-center gap-1.5 cursor-pointer text-xs ${
@@ -420,216 +312,109 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
         </div>
       </div>
 
-      {/* Tab Content */}
-      {activeTab === 'chat' && (
-        <>
-          {/* Messages Thread */}
-          <div className="flex-1 overflow-y-auto p-3 sm:p-5 space-y-4">
-            <div className="max-w-3xl mx-auto w-full space-y-4">
-              {isLoadingDetail ? (
-                <div className="h-48 flex items-center justify-center text-slate-400 text-xs gap-2">
-                  <Loader2 className="w-5 h-5 animate-spin text-indigo-400" />
-                  <span>Carregando histórico da conversa...</span>
-                </div>
-              ) : messages.length === 0 ? (
-                <div className="h-64 flex flex-col items-center justify-center text-center p-6 text-slate-400 space-y-3">
-                  <div className="w-12 h-12 rounded-2xl bg-slate-800 flex items-center justify-center text-indigo-400 border border-slate-700 shadow-inner">
-                    <Database className="w-6 h-6" />
-                  </div>
-                  <div>
-                    <h3 className="font-semibold text-slate-200 text-sm">Conversa vazia</h3>
-                    <p className="text-xs text-slate-400 max-w-sm mt-1 leading-relaxed">
-                      Arraste e solte arquivos PDF aqui ou use as abas acima para alimentar a base desta conversa e faça perguntas com citações.
-                    </p>
-                  </div>
-                </div>
-              ) : (
-                messages.map((msg) => (
-                  <div
-                    key={msg.id}
-                    className={`flex flex-col ${
-                      msg.role === 'user' ? 'items-end' : 'items-start'
-                    }`}
-                  >
-                    <div
-                      className={`max-w-[92%] sm:max-w-[85%] rounded-2xl px-4 py-3 text-xs sm:text-sm shadow-md leading-relaxed ${
-                        msg.role === 'user'
-                          ? 'bg-indigo-600 text-white rounded-br-none'
-                          : msg.role === 'assistant'
-                          ? 'bg-slate-800/90 text-slate-100 border border-slate-700/80 rounded-bl-none shadow-indigo-950/20'
-                          : 'bg-red-950/50 text-red-200 border border-red-800/50'
-                      }`}
-                    >
-                      <p className="whitespace-pre-wrap">{msg.content}</p>
-
-                      {/* Citations Box (Recolhido automaticamente se > 2) */}
-                      {msg.citations && msg.citations.length > 0 && (
-                        <MessageCitations citations={msg.citations} />
-                      )}
-                    </div>
-                    <span className="text-[10px] text-slate-400 mt-1 px-1">
-                      {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                    </span>
-                  </div>
-                ))
-              )}
-
-              {isLoading && (
-                <div className="flex items-center gap-2 text-slate-400 text-xs py-2 px-3 bg-slate-800/60 rounded-lg w-fit border border-slate-700/40 animate-pulse">
-                  <Loader2 className="w-4 h-4 animate-spin text-indigo-400" />
-                  <span>Consultando documentos da conversa com Gemini AI...</span>
-                </div>
-              )}
-              <div ref={messagesEndRef} />
+      {/* Messages Thread */}
+      <div className="flex-1 overflow-y-auto p-3 sm:p-5 space-y-4">
+        <div className="max-w-3xl mx-auto w-full space-y-4">
+          {isLoadingDetail ? (
+            <div className="h-48 flex items-center justify-center text-slate-400 text-xs gap-2">
+              <Loader2 className="w-5 h-5 animate-spin text-indigo-400" />
+              <span>Carregando histórico da conversa...</span>
             </div>
-          </div>
-
-          {/* Chat Input */}
-          <div className="p-3 sm:p-4 border-t border-slate-800 bg-slate-950/60 backdrop-blur-sm">
-            <form onSubmit={handleSendMessage} className="max-w-3xl mx-auto flex gap-2">
-              <input
-                type="text"
-                value={inputQuery}
-                onChange={(e) => setInputQuery(e.target.value)}
-                placeholder="Pergunte algo sobre os documentos desta conversa..."
-                disabled={isLoading}
-                className="flex-1 bg-slate-800/90 border border-slate-700 text-slate-100 text-xs sm:text-sm rounded-xl px-3.5 py-2.5 sm:py-3 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent placeholder-slate-400 transition-all disabled:opacity-50"
-              />
-              <button
-                type="submit"
-                disabled={isLoading || !inputQuery.trim()}
-                className="bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 text-white p-2.5 sm:p-3 rounded-xl font-medium transition-all shadow-md flex items-center justify-center cursor-pointer disabled:cursor-not-allowed flex-shrink-0"
-                aria-label="Enviar"
-              >
-                {isLoading ? <Loader2 className="w-4 h-4 sm:w-5 sm:h-5 animate-spin" /> : <Send className="w-4 h-4 sm:w-5 sm:h-5" />}
-              </button>
-            </form>
-          </div>
-        </>
-      )}
-
-      {/* Upload PDF Tab */}
-      {activeTab === 'upload' && (
-        <div className="p-4 sm:p-8 flex-1 overflow-y-auto space-y-6">
-          <div 
-            className="max-w-xl mx-auto border-2 border-dashed border-slate-700 hover:border-indigo-500 rounded-2xl p-6 sm:p-10 text-center transition-all bg-slate-800/30 hover:bg-slate-800/50 flex flex-col items-center justify-center group"
-          >
-            <input
-              type="file"
-              ref={fileInputRef}
-              onChange={handleFileInputChange}
-              multiple
-              accept="application/pdf"
-              className="hidden"
-              id="pdf-upload-input"
-            />
-            <label
-              htmlFor="pdf-upload-input"
-              className="cursor-pointer flex flex-col items-center space-y-3 w-full"
-            >
-              <div className="p-3 sm:p-4 bg-indigo-600/20 group-hover:bg-indigo-600/30 text-indigo-400 rounded-2xl border border-indigo-500/30 shadow-inner transition-all">
-                <Upload className="w-6 h-6 sm:w-8 sm:h-8" />
+          ) : messages.length === 0 ? (
+            <div className="h-64 flex flex-col items-center justify-center text-center p-6 text-slate-400 space-y-3">
+              <div className="w-12 h-12 rounded-2xl bg-slate-800 flex items-center justify-center text-indigo-400 border border-slate-700 shadow-inner">
+                <Database className="w-6 h-6" />
               </div>
-              <span className="text-sm sm:text-base font-semibold text-slate-200">
-                Arraste e solte seus PDFs aqui ou clique para selecionar
-              </span>
-              <span className="text-xs text-slate-400 max-w-xs leading-relaxed">
-                Suporta múltiplos arquivos simultâneos com extração de alta velocidade e indexação em lote.
-              </span>
-            </label>
-          </div>
+              <div>
+                <h3 className="font-semibold text-slate-200 text-sm">Conversa vazia</h3>
+                <p className="text-xs text-slate-400 max-w-sm mt-1 leading-relaxed">
+                  Arraste e solte arquivos PDF aqui ou abra a aba de documentos para adicionar materiais e faça perguntas com citações precisas.
+                </p>
+              </div>
+            </div>
+          ) : (
+            messages.map((msg) => (
+              <div
+                key={msg.id}
+                className={`flex flex-col ${
+                  msg.role === 'user' ? 'items-end' : 'items-start'
+                }`}
+              >
+                <div
+                  className={`max-w-[92%] sm:max-w-[85%] rounded-2xl px-4 py-3 text-xs sm:text-sm shadow-md leading-relaxed ${
+                    msg.role === 'user'
+                      ? 'bg-indigo-600 text-white rounded-br-none'
+                      : msg.role === 'assistant'
+                      ? 'bg-slate-800/90 text-slate-100 border border-slate-700/80 rounded-bl-none shadow-indigo-950/20'
+                      : 'bg-red-950/50 text-red-200 border border-red-800/50'
+                  }`}
+                >
+                  <p className="whitespace-pre-wrap">{msg.content}</p>
+
+                  {/* Citations Box (Recolhido automaticamente se > 2) */}
+                  {msg.citations && msg.citations.length > 0 && (
+                    <MessageCitations citations={msg.citations} />
+                  )}
+                </div>
+                <span className="text-[10px] text-slate-400 mt-1 px-1">
+                  {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                </span>
+              </div>
+            ))
+          )}
+
+          {isLoading && (
+            <div className="flex items-center gap-2 text-slate-400 text-xs py-2 px-3 bg-slate-800/60 rounded-lg w-fit border border-slate-700/40 animate-pulse">
+              <Loader2 className="w-4 h-4 animate-spin text-indigo-400" />
+              <span>Consultando documentos da conversa com Gemini AI...</span>
+            </div>
+          )}
 
           {isUploading && (
-            <div className="max-w-xl mx-auto flex items-center justify-center gap-2 p-3 bg-indigo-950/60 border border-indigo-700/50 rounded-xl text-indigo-200 text-xs sm:text-sm">
+            <div className="flex items-center gap-2 text-indigo-300 text-xs py-2 px-3 bg-indigo-950/70 rounded-lg w-fit border border-indigo-700/50 animate-pulse">
               <Loader2 className="w-4 h-4 animate-spin text-indigo-400" />
-              <span>Processando e indexando documentos na conversa...</span>
+              <span>Processando e indexando arquivos PDF arrastados...</span>
             </div>
           )}
 
           {uploadFeedback && (
-            <div 
-              className={`max-w-xl mx-auto p-3.5 rounded-xl text-xs sm:text-sm flex items-center gap-2.5 border ${
+            <div
+              className={`p-2.5 rounded-lg text-xs flex items-center gap-2 border w-fit ${
                 uploadFeedback.type === 'success'
-                  ? 'bg-slate-800/80 border-slate-700 text-slate-300'
+                  ? 'bg-slate-800/90 border-slate-700 text-slate-300'
                   : 'bg-red-950/60 border-red-800/60 text-red-200'
               }`}
             >
-              {uploadFeedback.type === 'success' ? (
-                <CheckCircle2 className="w-4 h-4 sm:w-5 sm:h-5 text-emerald-400 flex-shrink-0" />
-              ) : (
-                <AlertCircle className="w-4 h-4 sm:w-5 sm:h-5 text-red-400 flex-shrink-0" />
-              )}
+              <AlertCircle className="w-4 h-4 text-indigo-400 flex-shrink-0" />
               <span>{uploadFeedback.message}</span>
             </div>
           )}
+
+          <div ref={messagesEndRef} />
         </div>
-      )}
+      </div>
 
-      {/* Insert Free Text Tab */}
-      {activeTab === 'text' && (
-        <form onSubmit={handleTextUpload} className="p-4 sm:p-8 flex-1 overflow-y-auto space-y-4 max-w-xl mx-auto w-full">
-          <div>
-            <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">
-              Título do Documento / Nota
-            </label>
-            <input
-              type="text"
-              value={freeTextTitle}
-              onChange={(e) => setFreeTextTitle(e.target.value)}
-              placeholder="Ex: Anotações da Reunião"
-              className="w-full bg-slate-800/90 border border-slate-700 text-slate-100 text-xs sm:text-sm rounded-xl px-3.5 py-2.5 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
-            />
-          </div>
-
-          <div>
-            <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">
-              Conteúdo de Texto Livre
-            </label>
-            <textarea
-              value={freeText}
-              onChange={(e) => setFreeText(e.target.value)}
-              rows={8}
-              placeholder="Cole ou digite aqui o texto que deve ser incorporado aos documentos desta conversa..."
-              className="w-full bg-slate-800/90 border border-slate-700 text-slate-100 text-xs sm:text-sm rounded-xl p-3.5 focus:ring-2 focus:ring-indigo-500 focus:outline-none resize-none leading-relaxed"
-            />
-          </div>
-
+      {/* Chat Input Bar */}
+      <div className="p-3 sm:p-4 border-t border-slate-800 bg-slate-950/60 backdrop-blur-sm">
+        <form onSubmit={handleSendMessage} className="max-w-3xl mx-auto flex gap-2">
+          <input
+            type="text"
+            value={inputQuery}
+            onChange={(e) => setInputQuery(e.target.value)}
+            placeholder="Pergunte algo sobre os documentos desta conversa..."
+            disabled={isLoading}
+            className="flex-1 bg-slate-800/90 border border-slate-700 text-slate-100 text-xs sm:text-sm rounded-xl px-3.5 py-2.5 sm:py-3 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent placeholder-slate-400 transition-all disabled:opacity-50"
+          />
           <button
             type="submit"
-            disabled={isUploading || !freeText.trim()}
-            className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 text-white font-medium py-3 rounded-xl text-xs sm:text-sm transition-all flex items-center justify-center gap-2 shadow-md cursor-pointer disabled:cursor-not-allowed"
+            disabled={isLoading || !inputQuery.trim()}
+            className="bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 text-white p-2.5 sm:p-3 rounded-xl font-medium transition-all shadow-md flex items-center justify-center cursor-pointer disabled:cursor-not-allowed flex-shrink-0"
+            aria-label="Enviar"
           >
-            {isUploading ? (
-              <>
-                <Loader2 className="w-4 h-4 animate-spin" />
-                <span>Indexando Texto na Conversa...</span>
-              </>
-            ) : (
-              <>
-                <Plus className="w-4 h-4" />
-                <span>Adicionar aos Documentos da Conversa</span>
-              </>
-            )}
+            {isLoading ? <Loader2 className="w-4 h-4 sm:w-5 sm:h-5 animate-spin" /> : <Send className="w-4 h-4 sm:w-5 sm:h-5" />}
           </button>
-
-          {uploadFeedback && (
-            <div 
-              className={`p-3.5 rounded-xl text-xs sm:text-sm flex items-center gap-2.5 border ${
-                uploadFeedback.type === 'success'
-                  ? 'bg-slate-800/80 border-slate-700 text-slate-300'
-                  : 'bg-red-950/60 border-red-800/60 text-red-200'
-              }`}
-            >
-              {uploadFeedback.type === 'success' ? (
-                <CheckCircle2 className="w-4 h-4 sm:w-5 sm:h-5 text-emerald-400 flex-shrink-0" />
-              ) : (
-                <AlertCircle className="w-4 h-4 sm:w-5 sm:h-5 text-red-400 flex-shrink-0" />
-              )}
-              <span>{uploadFeedback.message}</span>
-            </div>
-          )}
         </form>
-      )}
+      </div>
     </div>
   );
 };
