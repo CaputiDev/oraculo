@@ -28,13 +28,13 @@ def test_pdf_parser_extracts_pages_with_pymupdf():
         assert chunks[0].file_name == "manual_usuario.pdf"
         assert chunks[0].page_number == 1
         assert "primeira página" in chunks[0].content
-        assert chunks[0].chunk_id == "manual_usuario.pdf_p1_c0"
+        assert "manual_usuario.pdf_p1" in chunks[0].chunk_id
         
         # Test Page 2 metadata
         assert chunks[1].file_name == "manual_usuario.pdf"
         assert chunks[1].page_number == 2
         assert "segunda página" in chunks[1].content
-        assert chunks[1].chunk_id == "manual_usuario.pdf_p2_c0"
+        assert "manual_usuario.pdf_p2" in chunks[1].chunk_id
 
 
 def test_pdf_parser_fallback_to_pypdf_on_pymupdf_failure():

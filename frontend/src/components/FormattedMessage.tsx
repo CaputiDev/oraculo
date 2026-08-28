@@ -21,11 +21,6 @@ export const FormattedMessage: React.FC<FormattedMessageProps> = ({
 
   // Regex abrangente para capturar qualquer variação de citação inline entre colchetes:
   // Exemplos suportados:
-  // - [tcc_pedro.pdf:11, 15] ou [tcc_pedro.pdf:11]
-  // - [tcc_pedro.pdf, págs. 11, 15] ou [tcc_pedro.pdf, pág. 11]
-  // - [Fonte: tcc_pedro.pdf, pág. 11]
-  // - [1:11, 15] ou [1:11] ou [1]
-  // - [tcc_pedro.pdf]
   const citationRegex = /\[(?:Fonte:\s*|Doc\s*:?\s*)?([a-zA-Z0-9_\-\. \(\)\/]+?)(?::\s*([^\]]+)|,\s*(?:págs?\.?|p\.?)?\s*([^\]]+))?\]/gi;
 
   const elements: React.ReactNode[] = [];

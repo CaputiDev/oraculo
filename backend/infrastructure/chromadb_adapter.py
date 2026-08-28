@@ -7,8 +7,8 @@ from infrastructure.bm25_retriever import BM25Retriever
 class ChromaDBAdapter:
     """
     Adaptador de infraestrutura para o banco vetorial ChromaDB com suporte a persistência local,
-    particionamento por conversation_id, cache em memória, geração de Batch Embeddings (em lote)
-    e Busca Híbrida (BM25 + Chroma com Reciprocal Rank Fusion - RRF).
+    particionamento por conversation_id, cache em memória, geração de Batch Embeddings (em lote),
+    Busca Híbrida (BM25 + Chroma com Reciprocal Rank Fusion - RRF) e Parent-Child Retrieval (re-hidratação hierárquica).
     """
 
     def __init__(
@@ -56,40 +56,34 @@ class ChromaDBAdapter:
             return batch_res[0]
         raise RuntimeError("Falha ao gerar embedding individual.")
 
-    def _get_batch_embeddings(self, texts: List[str], batch_size: int = 50) -> List[List[float]]:
+    def _get_batch_embeddings(self, texts: List[str], batch_size: int = 100) -> List[List[float]]:
         """
-        Gera embeddings em lote (Batch Embeddings) de alta performance, agrupando textos em requisições únicas.
+        Gera embeddings em lote (Batch Embeddings) de alta performance com retry automático
+        e backoff exponencial para lidar de forma transparente com rate limits (429).
         """
         if not texts:
             return []
 
-        candidate_models = [
-            self.embedding_model_name,
-            "models/gemini-embedding-001",
-            "models/text-embedding-004",
-            "models/embedding-001",
-        ]
-        candidate_models = list(dict.fromkeys(candidate_models))
-
+        model_name = self.embedding_model_name or "models/gemini-embedding-001"
         all_embeddings: List[List[float]] = []
 
         try:
             import google.generativeai as genai
+            import time
             
-            # Processa em lotes de até batch_size
+            # Processa em lotes otimizados de até 100 chunks por chamada
             for i in range(0, len(texts), batch_size):
                 chunk_batch = texts[i:i + batch_size]
-                last_error = None
-                batch_success = False
+                max_retries = 4
+                success = False
 
-                for model_name in candidate_models:
+                for attempt in range(max_retries):
                     try:
                         result = genai.embed_content(
                             model=model_name,
                             content=chunk_batch,
                             task_type="retrieval_document"
                         )
-                        self.embedding_model_name = model_name
                         raw_emb = result["embedding"]
 
                         # Se for lote de 1 elemento, a API pode retornar list[float] ou list[list[float]]
@@ -98,14 +92,27 @@ class ChromaDBAdapter:
                         else:
                             all_embeddings.extend(raw_emb)
 
-                        batch_success = True
+                        success = True
                         break
                     except Exception as e:
-                        last_error = e
-                        continue
+                        err_msg = str(e).lower()
+                        # Se for erro de quota / rate limit (429), aguarda o tempo exato indicado pelo Google
+                        if "429" in err_msg or "quota" in err_msg or "resourceexhausted" in err_msg:
+                            import re
+                            delay_match = re.search(r'retry in (\d+(?:\.\d+)?)s', err_msg) or re.search(r'seconds:\s*(\d+)', err_msg)
+                            wait_time = float(delay_match.group(1)) + 1.0 if delay_match else 25.0
+                            time.sleep(min(wait_time, 35.0))
+                        elif attempt < max_retries - 1:
+                            time.sleep(2)
+                        else:
+                            raise e
 
-                if not batch_success:
-                    raise last_error or RuntimeError("Falha ao gerar embeddings em lote.")
+                if not success:
+                    raise RuntimeError("Falha ao gerar embeddings após múltiplas tentativas.")
+
+                # Pequena pausa entre lotes para respeitar o limite de taxa por segundo
+                if i + batch_size < len(texts):
+                    time.sleep(0.5)
 
             return all_embeddings
         except Exception as e:
@@ -113,31 +120,26 @@ class ChromaDBAdapter:
 
     def _get_query_embedding(self, query: str) -> List[float]:
         """
-        Recupera embedding de busca com cache em memória LRU para latência zero em termos recorrentes.
+        Recupera embedding de busca com cache em memória LRU e retry para latência zero em termos recorrentes.
         """
         clean_query = query.strip()
         if clean_query in self._query_cache:
             return self._query_cache[clean_query]
 
-        candidate_models = [
-            self.embedding_model_name,
-            "models/gemini-embedding-001",
-            "models/text-embedding-004",
-            "models/embedding-001",
-        ]
-        candidate_models = list(dict.fromkeys(candidate_models))
+        model_name = self.embedding_model_name or "models/gemini-embedding-001"
 
         try:
             import google.generativeai as genai
-            last_error = None
-            for model_name in candidate_models:
+            import time
+
+            max_retries = 3
+            for attempt in range(max_retries):
                 try:
                     result = genai.embed_content(
                         model=model_name,
                         content=clean_query,
                         task_type="retrieval_query"
                     )
-                    self.embedding_model_name = model_name
                     emb = result["embedding"]
 
                     # Mantém o cache limitado a 256 queries mais recentes
@@ -147,17 +149,22 @@ class ChromaDBAdapter:
 
                     return emb
                 except Exception as e:
-                    last_error = e
-                    continue
+                    err_msg = str(e).lower()
+                    if ("429" in err_msg or "quota" in err_msg or "resourceexhausted" in err_msg) and attempt < max_retries - 1:
+                        time.sleep(5 * (attempt + 1))
+                    elif attempt < max_retries - 1:
+                        time.sleep(1)
+                    else:
+                        raise e
 
-            raise last_error or RuntimeError("Nenhum modelo de embedding para busca respondeu.")
+            raise RuntimeError("Nenhum modelo de embedding para busca respondeu.")
         except Exception as e:
             raise RuntimeError(f"Erro ao gerar embedding de busca: {str(e)}")
 
     def add_chunks(self, chunks: List[DocumentChunk], conversation_id: str = "default") -> int:
         """
-        Adiciona lista de chunks de documentos ao ChromaDB associados a uma conversation_id
-        utilizando Batch Embeddings e indexa simultaneamente no BM25.
+        Adiciona lista de Child Chunks ao ChromaDB e BM25 associados à conversa,
+        preservando parent_id e parent_content nos metadados para Parent-Child Retrieval.
         """
         if not chunks:
             return 0
@@ -171,13 +178,15 @@ class ChromaDBAdapter:
                 "file_name": chunk.file_name,
                 "page_number": chunk.page_number,
                 "conversation_id": conversation_id,
+                "parent_id": chunk.parent_id or chunk.chunk_id,
+                "parent_content": chunk.parent_content or chunk.content,
                 **chunk.metadata
             }
             for chunk in chunks
         ]
 
-        # Geração de embeddings em lote (1 única chamada para dezenas de chunks)
-        embeddings = self._get_batch_embeddings(documents, batch_size=50)
+        # Geração de embeddings em lote dos Child Chunks compactos
+        embeddings = self._get_batch_embeddings(documents, batch_size=100)
 
         self.collection.upsert(
             ids=ids,
@@ -186,13 +195,15 @@ class ChromaDBAdapter:
             embeddings=embeddings
         )
 
-        # Indexa no motor léxico BM25 com os IDs unificados
+        # Indexa no motor léxico BM25
         bm25_chunks = [
             DocumentChunk(
                 chunk_id=ids[i],
                 file_name=chunks[i].file_name,
                 page_number=chunks[i].page_number,
                 content=chunks[i].content,
+                parent_id=metadatas[i]["parent_id"],
+                parent_content=metadatas[i]["parent_content"],
                 metadata=metadatas[i]
             )
             for i in range(len(chunks))
@@ -210,6 +221,36 @@ class ChromaDBAdapter:
             if chunks:
                 self.bm25_retriever.add_chunks(chunks, conversation_id=conversation_id)
 
+    def _hydrate_parent_chunks(self, child_chunks: List[DocumentChunk], limit: int) -> List[DocumentChunk]:
+        """
+        Re-hidrata os Child Chunks recuperados em seus respectivos Parent Chunks completos,
+        desduplicando por parent_id para enriquecer o contexto do LLM sem redundâncias.
+        """
+        seen_parents = set()
+        hydrated_chunks: List[DocumentChunk] = []
+
+        for chunk in child_chunks:
+            parent_id = chunk.parent_id or (chunk.metadata.get("parent_id") if chunk.metadata else None) or chunk.chunk_id
+            parent_content = chunk.parent_content or (chunk.metadata.get("parent_content") if chunk.metadata else None) or chunk.content
+
+            if parent_id not in seen_parents:
+                seen_parents.add(parent_id)
+                hydrated_chunks.append(
+                    DocumentChunk(
+                        chunk_id=parent_id,
+                        file_name=chunk.file_name,
+                        page_number=chunk.page_number,
+                        content=parent_content,
+                        parent_id=parent_id,
+                        parent_content=parent_content,
+                        metadata=chunk.metadata
+                    )
+                )
+                if len(hydrated_chunks) >= limit:
+                    break
+
+        return hydrated_chunks
+
     def similarity_search(
         self,
         query: str,
@@ -217,7 +258,8 @@ class ChromaDBAdapter:
         k: int = 4
     ) -> List[DocumentChunk]:
         """
-        Executa busca semântica densa filtrando exclusivamente pelos chunks da conversa ativa.
+        Executa busca semântica densa filtrando exclusivamente pelos chunks da conversa ativa
+        e re-idrata os resultados para os Parent Chunks completos.
         """
         if not self.collection:
             raise RuntimeError("ChromaDB client não foi inicializado corretamente.")
@@ -225,9 +267,10 @@ class ChromaDBAdapter:
         query_emb = self._get_query_embedding(query)
         where_filter = {"conversation_id": conversation_id} if conversation_id else None
 
+        fetch_k = max(k * 3, 10)
         results = self.collection.query(
             query_embeddings=[query_emb],
-            n_results=k,
+            n_results=fetch_k,
             where=where_filter,
             include=["documents", "metadatas", "distances"]
         )
@@ -248,11 +291,13 @@ class ChromaDBAdapter:
                     file_name=meta.get("file_name", "Desconhecido"),
                     page_number=int(meta.get("page_number", 1)),
                     content=doc_list[i],
+                    parent_id=meta.get("parent_id"),
+                    parent_content=meta.get("parent_content"),
                     metadata=meta
                 )
             )
 
-        return retrieved_chunks
+        return self._hydrate_parent_chunks(retrieved_chunks, limit=k)
 
     def hybrid_search(
         self,
@@ -263,7 +308,7 @@ class ChromaDBAdapter:
     ) -> List[DocumentChunk]:
         """
         Executa Busca Híbrida (Busca Vetorial Densa + BM25 Léxico Esparso)
-        com re-ranqueamento via Reciprocal Rank Fusion (RRF).
+        com re-ranqueamento via Reciprocal Rank Fusion (RRF) e re-hidratação para Parent Chunks.
         """
         if not query or not query.strip():
             return []
@@ -271,12 +316,38 @@ class ChromaDBAdapter:
         cid = conversation_id or "default"
         self._ensure_bm25_loaded(cid)
 
-        fetch_k = max(k * 2, 8)
+        fetch_k = max(k * 3, 10)
 
-        # 1. Busca Semântica Densa (ChromaDB)
-        dense_results = self.similarity_search(query, conversation_id=cid, k=fetch_k)
+        # 1. Busca Semântica Densa (ChromaDB) nos Child Chunks
+        where_filter = {"conversation_id": cid}
+        query_emb = self._get_query_embedding(query)
+        results = self.collection.query(
+            query_embeddings=[query_emb],
+            n_results=fetch_k,
+            where=where_filter,
+            include=["documents", "metadatas"]
+        )
 
-        # 2. Busca Léxica Esparsa (BM25)
+        dense_results: List[DocumentChunk] = []
+        if results and results.get("documents") and results["documents"][0]:
+            d_docs = results["documents"][0]
+            d_metas = results["metadatas"][0]
+            d_ids = results["ids"][0]
+            for i in range(len(d_docs)):
+                meta = d_metas[i] or {}
+                dense_results.append(
+                    DocumentChunk(
+                        chunk_id=d_ids[i],
+                        file_name=meta.get("file_name", "Desconhecido"),
+                        page_number=int(meta.get("page_number", 1)),
+                        content=d_docs[i],
+                        parent_id=meta.get("parent_id"),
+                        parent_content=meta.get("parent_content"),
+                        metadata=meta
+                    )
+                )
+
+        # 2. Busca Léxica Esparsa (BM25) nos Child Chunks
         bm25_results = self.bm25_retriever.search(query, conversation_id=cid, k=fetch_k)
 
         if not dense_results and not bm25_results:
@@ -303,7 +374,10 @@ class ChromaDBAdapter:
             reverse=True
         )
 
-        return [chunk_map[item_id] for item_id in sorted_ids[:k]]
+        top_child_chunks = [chunk_map[item_id] for item_id in sorted_ids]
+
+        # 5. Re-hidrata os Child Chunks nos Parent Chunks correspondentes com desduplicação
+        return self._hydrate_parent_chunks(top_child_chunks, limit=k)
 
     def get_indexed_files(self, conversation_id: Optional[str] = None) -> List[str]:
         """
@@ -347,6 +421,8 @@ class ChromaDBAdapter:
                         file_name=meta.get("file_name", "Desconhecido"),
                         page_number=int(meta.get("page_number", 1)),
                         content=data["documents"][i],
+                        parent_id=meta.get("parent_id"),
+                        parent_content=meta.get("parent_content"),
                         metadata=meta
                     )
                 )
@@ -389,6 +465,8 @@ class ChromaDBAdapter:
                         file_name=meta.get("file_name", file_name),
                         page_number=int(meta.get("page_number", 1)),
                         content=data["documents"][i],
+                        parent_id=meta.get("parent_id"),
+                        parent_content=meta.get("parent_content"),
                         metadata=meta
                     )
                 )
