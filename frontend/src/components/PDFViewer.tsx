@@ -12,9 +12,10 @@ import {
   Layers,
   Search,
   Hash,
-  Sparkles,
   Loader2,
-  FileCode
+  FileCode,
+  PanelRightClose,
+  X
 } from 'lucide-react';
 import { useViewerStore } from '../store/useViewerStore';
 import { useConversationStore } from '../store/useConversationStore';
@@ -23,11 +24,13 @@ import { DocumentDetail, DocumentChunkData } from '../types';
 interface PDFViewerProps {
   uploadsBaseUrl?: string;
   apiBaseUrl?: string;
+  onClose?: () => void;
 }
 
 export const PDFViewer: React.FC<PDFViewerProps> = ({
   uploadsBaseUrl = process.env.NEXT_PUBLIC_UPLOADS_URL || 'http://localhost:8000/uploads',
   apiBaseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api',
+  onClose,
 }) => {
   const { 
     activeFile, 
@@ -38,7 +41,8 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({
     setActivePage, 
     setActiveFile, 
     setTotalPages,
-    setZoom 
+    setZoom,
+    setViewerOpen
   } = useViewerStore();
 
   const activeConversationId = useConversationStore((state) => state.activeConversationId);
@@ -49,6 +53,14 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({
   const [searchTerm, setSearchTerm] = useState('');
 
   const isPdf = activeFile?.toLowerCase().endsWith('.pdf');
+
+  const handleClose = () => {
+    if (onClose) {
+      onClose();
+    } else {
+      setViewerOpen(false);
+    }
+  };
 
   // Ajusta o modo inicial baseado no tipo de arquivo
   useEffect(() => {
@@ -123,11 +135,11 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({
   }) || [];
 
   return (
-    <div className="flex flex-col h-full bg-slate-950 text-slate-100 select-none">
+    <div className="flex flex-col h-full bg-slate-950 text-slate-100 select-none border-l border-slate-800 shadow-2xl">
       {/* Viewer Header / Toolbar */}
-      <div className="flex items-center justify-between px-4 py-2.5 bg-slate-900 border-b border-slate-800 shadow-sm flex-wrap gap-2">
+      <div className="flex items-center justify-between px-3.5 py-2.5 bg-slate-900 border-b border-slate-800 shadow-sm flex-wrap gap-2">
         {/* Document Info & Switcher */}
-        <div className="flex items-center gap-2 max-w-[35%]">
+        <div className="flex items-center gap-2 max-w-[40%] min-w-[140px]">
           <FileText className="w-4 h-4 text-indigo-400 flex-shrink-0" />
           {documents.length > 0 ? (
             <select
@@ -176,7 +188,7 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({
           </div>
         )}
 
-        {/* Page & Zoom Navigation Controls */}
+        {/* Page & Zoom Navigation Controls + Close Button */}
         <div className="flex items-center gap-2">
           {/* Pagination */}
           <div className="flex items-center gap-1.5 bg-slate-800/80 px-2 py-1 rounded-lg border border-slate-700">
@@ -196,7 +208,7 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({
                 value={activePage}
                 onChange={(e) => setActivePage(parseInt(e.target.value) || 1)}
                 min={1}
-                className="w-10 bg-slate-900 border border-slate-700 text-center rounded py-0.5 text-xs text-indigo-300 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                className="w-9 bg-slate-900 border border-slate-700 text-center rounded py-0.5 text-xs text-indigo-300 focus:outline-none focus:ring-1 focus:ring-indigo-500"
               />
               <span className="text-slate-500">/</span>
               <span className="text-slate-400">{totalPages > 0 ? totalPages : '—'}</span>
@@ -248,6 +260,16 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({
               <ExternalLink className="w-4 h-4" />
             </a>
           )}
+
+          {/* Close / Collapse Viewer Button */}
+          <button
+            onClick={handleClose}
+            className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white rounded-lg border border-slate-700 transition"
+            title="Recolher visualizador"
+            aria-label="Recolher visualizador de documentos"
+          >
+            <PanelRightClose className="w-4 h-4" />
+          </button>
         </div>
       </div>
 

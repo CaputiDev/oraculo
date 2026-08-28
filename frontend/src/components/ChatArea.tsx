@@ -1,7 +1,20 @@
 'use client';
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Upload, FileText, Sparkles, Loader2, Plus, Database, CheckCircle2, Files } from 'lucide-react';
+import { 
+  Send, 
+  Upload, 
+  FileText, 
+  Sparkles, 
+  Loader2, 
+  Plus, 
+  Database, 
+  CheckCircle2, 
+  Menu, 
+  PanelLeft, 
+  PanelRight, 
+  BookOpen 
+} from 'lucide-react';
 import { ChatMessage, Citation } from '../types';
 import { CitationBadge } from './CitationBadge';
 import { useViewerStore } from '../store/useViewerStore';
@@ -20,11 +33,15 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
     activeConversationId,
     activeConversation,
     isLoadingDetail,
+    isSidebarOpen,
+    toggleSidebar,
     appendMessageToActive,
     addFileToActive,
     createConversation,
     fetchConversations,
   } = useConversationStore();
+
+  const { isViewerOpen, toggleViewer, setDocuments, documents } = useViewerStore();
 
   const [inputQuery, setInputQuery] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -38,8 +55,6 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  
-  const { setDocuments } = useViewerStore();
 
   const messages: ChatMessage[] = activeConversation?.messages || initialMessages;
 
@@ -201,59 +216,94 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
     }
   };
 
+  const docCount = activeConversation?.files?.length ?? documents?.length ?? 0;
+
   return (
-    <div className="flex flex-col h-full bg-slate-900 border-r border-slate-800 text-slate-100">
-      {/* Header & Tabs */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-slate-800 bg-slate-950/60 backdrop-blur-sm">
-        <div className="flex items-center gap-2 truncate max-w-[50%]">
-          <div className="p-2 bg-indigo-600/20 text-indigo-400 rounded-lg border border-indigo-500/30 flex-shrink-0">
-            <Sparkles className="w-4 h-4" />
-          </div>
+    <div className="flex flex-col h-full bg-slate-900 text-slate-100 relative">
+      {/* Header & Quick Action Buttons */}
+      <div className="flex items-center justify-between px-3 sm:px-4 py-2.5 sm:py-3 border-b border-slate-800 bg-slate-950/70 backdrop-blur-md gap-2 flex-wrap sm:flex-nowrap">
+        {/* Left: Sidebar Toggle & Title */}
+        <div className="flex items-center gap-2 min-w-0 flex-1">
+          <button
+            onClick={toggleSidebar}
+            className={`p-2 rounded-lg border transition-all flex items-center justify-center cursor-pointer ${
+              isSidebarOpen
+                ? 'bg-indigo-600/20 text-indigo-300 border-indigo-500/40 shadow-sm'
+                : 'bg-slate-800/80 text-slate-300 border-slate-700 hover:bg-slate-700 hover:text-white'
+            }`}
+            title={isSidebarOpen ? 'Recolher histórico' : 'Abrir histórico de conversas'}
+            aria-label="Alternar histórico"
+          >
+            <PanelLeft className="w-4 h-4" />
+          </button>
+
           <div className="truncate">
-            <h2 className="text-sm font-bold tracking-wide text-white truncate">
+            <h2 className="text-xs sm:text-sm font-bold tracking-wide text-white truncate">
               {activeConversation?.title || 'Chat com IA'}
             </h2>
-            <p className="text-[10px] text-slate-400 font-mono truncate">
-              {activeConversation?.files && activeConversation.files.length > 0
-                ? `${activeConversation.files.length} doc(s) vinculados`
-                : 'Nenhum documento anexado'}
+            <p className="text-[10px] text-slate-400 font-mono truncate hidden sm:block">
+              {docCount > 0 ? `${docCount} doc(s) vinculados` : 'Nenhum documento anexado'}
             </p>
           </div>
         </div>
 
-        {/* Navigation Tabs */}
-        <div className="flex bg-slate-800/80 p-0.5 rounded-lg border border-slate-700/60 text-xs">
+        {/* Center/Right: Tabs + Document Viewer Toggle */}
+        <div className="flex items-center gap-1.5 sm:gap-2">
+          {/* Navigation Tabs */}
+          <div className="flex bg-slate-800/90 p-0.5 rounded-lg border border-slate-700/80 text-[11px] sm:text-xs">
+            <button
+              onClick={() => setActiveTab('chat')}
+              className={`px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-md font-medium transition-all ${
+                activeTab === 'chat'
+                  ? 'bg-indigo-600 text-white shadow-sm'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              Chat
+            </button>
+            <button
+              onClick={() => setActiveTab('upload')}
+              className={`px-2 sm:px-2.5 py-1 sm:py-1.5 rounded-md font-medium transition-all flex items-center gap-1 ${
+                activeTab === 'upload'
+                  ? 'bg-indigo-600 text-white shadow-sm'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <Upload className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+              <span className="hidden xs:inline">Upload</span>
+            </button>
+            <button
+              onClick={() => setActiveTab('text')}
+              className={`px-2 sm:px-2.5 py-1 sm:py-1.5 rounded-md font-medium transition-all flex items-center gap-1 ${
+                activeTab === 'text'
+                  ? 'bg-indigo-600 text-white shadow-sm'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <FileText className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+              <span className="hidden xs:inline">Texto</span>
+            </button>
+          </div>
+
+          {/* Right: Document Viewer Toggle Button */}
           <button
-            onClick={() => setActiveTab('chat')}
-            className={`px-3 py-1.5 rounded-md font-medium transition-all ${
-              activeTab === 'chat'
-                ? 'bg-indigo-600 text-white shadow-sm'
-                : 'text-slate-400 hover:text-slate-200'
+            onClick={toggleViewer}
+            className={`p-1.5 sm:p-2 rounded-lg border transition-all flex items-center gap-1.5 cursor-pointer text-xs ${
+              isViewerOpen
+                ? 'bg-indigo-600/20 text-indigo-300 border-indigo-500/40 shadow-sm'
+                : 'bg-slate-800/80 text-slate-300 border-slate-700 hover:bg-slate-700 hover:text-white'
             }`}
+            title={isViewerOpen ? 'Recolher visualizador de documentos' : 'Abrir visualizador de documentos'}
+            aria-label="Alternar visualizador"
           >
-            Chat
-          </button>
-          <button
-            onClick={() => setActiveTab('upload')}
-            className={`px-3 py-1.5 rounded-md font-medium transition-all flex items-center gap-1 ${
-              activeTab === 'upload'
-                ? 'bg-indigo-600 text-white shadow-sm'
-                : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <Upload className="w-3.5 h-3.5" />
-            Upload PDF
-          </button>
-          <button
-            onClick={() => setActiveTab('text')}
-            className={`px-3 py-1.5 rounded-md font-medium transition-all flex items-center gap-1 ${
-              activeTab === 'text'
-                ? 'bg-indigo-600 text-white shadow-sm'
-                : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <FileText className="w-3.5 h-3.5" />
-            Texto
+            <BookOpen className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+            <span className="text-[11px] font-semibold hidden md:inline">Documentos</span>
+            {docCount > 0 && (
+              <span className="bg-indigo-600 text-white text-[10px] px-1.5 py-0.2 rounded-full font-mono">
+                {docCount}
+              </span>
+            )}
+            <PanelRight className="w-3.5 h-3.5 opacity-60 hidden sm:inline" />
           </button>
         </div>
       </div>
@@ -262,97 +312,99 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
       {activeTab === 'chat' && (
         <>
           {/* Messages Thread */}
-          <div className="flex-1 overflow-y-auto p-4 space-y-4">
-            {isLoadingDetail ? (
-              <div className="h-full flex items-center justify-center text-slate-400 text-xs gap-2">
-                <Loader2 className="w-5 h-5 animate-spin text-indigo-400" />
-                <span>Carregando histórico da conversa...</span>
-              </div>
-            ) : messages.length === 0 ? (
-              <div className="h-full flex flex-col items-center justify-center text-center p-6 text-slate-400 space-y-3">
-                <div className="w-12 h-12 rounded-full bg-slate-800 flex items-center justify-center text-indigo-400 border border-slate-700">
-                  <Database className="w-6 h-6" />
+          <div className="flex-1 overflow-y-auto p-3 sm:p-5 space-y-4">
+            <div className="max-w-3xl mx-auto w-full space-y-4">
+              {isLoadingDetail ? (
+                <div className="h-48 flex items-center justify-center text-slate-400 text-xs gap-2">
+                  <Loader2 className="w-5 h-5 animate-spin text-indigo-400" />
+                  <span>Carregando histórico da conversa...</span>
                 </div>
-                <div>
-                  <h3 className="font-semibold text-slate-200 text-sm">Conversa vazia</h3>
-                  <p className="text-xs text-slate-400 max-w-xs mt-1">
-                    Faça upload de arquivos PDF ou insira textos para alimentar a base desta conversa e faça perguntas com citações interativas.
-                  </p>
+              ) : messages.length === 0 ? (
+                <div className="h-64 flex flex-col items-center justify-center text-center p-6 text-slate-400 space-y-3">
+                  <div className="w-12 h-12 rounded-2xl bg-slate-800 flex items-center justify-center text-indigo-400 border border-slate-700 shadow-inner">
+                    <Database className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h3 className="font-semibold text-slate-200 text-sm">Conversa vazia</h3>
+                    <p className="text-xs text-slate-400 max-w-sm mt-1 leading-relaxed">
+                      Faça upload de arquivos PDF ou insira textos na barra acima para alimentar esta conversa e faça perguntas com citações interativas.
+                    </p>
+                  </div>
                 </div>
-              </div>
-            ) : (
-              messages.map((msg) => (
-                <div
-                  key={msg.id}
-                  className={`flex flex-col ${
-                    msg.role === 'user' ? 'items-end' : 'items-start'
-                  }`}
-                >
+              ) : (
+                messages.map((msg) => (
                   <div
-                    className={`max-w-[85%] rounded-xl px-4 py-3 text-sm shadow-sm ${
-                      msg.role === 'user'
-                        ? 'bg-indigo-600 text-white rounded-br-none'
-                        : msg.role === 'assistant'
-                        ? 'bg-slate-800/90 text-slate-100 border border-slate-700/80 rounded-bl-none'
-                        : 'bg-red-950/50 text-red-200 border border-red-800/50'
+                    key={msg.id}
+                    className={`flex flex-col ${
+                      msg.role === 'user' ? 'items-end' : 'items-start'
                     }`}
                   >
-                    <p className="whitespace-pre-wrap leading-relaxed">{msg.content}</p>
+                    <div
+                      className={`max-w-[92%] sm:max-w-[85%] rounded-2xl px-4 py-3 text-xs sm:text-sm shadow-md leading-relaxed ${
+                        msg.role === 'user'
+                          ? 'bg-indigo-600 text-white rounded-br-none'
+                          : msg.role === 'assistant'
+                          ? 'bg-slate-800/90 text-slate-100 border border-slate-700/80 rounded-bl-none shadow-indigo-950/20'
+                          : 'bg-red-950/50 text-red-200 border border-red-800/50'
+                      }`}
+                    >
+                      <p className="whitespace-pre-wrap">{msg.content}</p>
 
-                    {/* Citations Box */}
-                    {msg.citations && msg.citations.length > 0 && (
-                      <div className="mt-3 pt-2 border-t border-slate-700/60">
-                        <div className="text-[11px] font-semibold text-indigo-300 uppercase tracking-wider mb-1 flex items-center gap-1">
-                          <FileText className="w-3 h-3" />
-                          Fontes Citadas (Clique para visualizar):
+                      {/* Citations Box */}
+                      {msg.citations && msg.citations.length > 0 && (
+                        <div className="mt-3 pt-2 border-t border-slate-700/60">
+                          <div className="text-[10px] sm:text-[11px] font-semibold text-indigo-300 uppercase tracking-wider mb-1 flex items-center gap-1">
+                            <FileText className="w-3 h-3" />
+                            Fontes Citadas (Clique para visualizar):
+                          </div>
+                          <div className="flex flex-wrap gap-1.5">
+                            {msg.citations.map((cit, idx) => (
+                              <CitationBadge
+                                key={`${cit.file_name}-${cit.page_number}-${idx}`}
+                                fileName={cit.file_name}
+                                pageNumber={cit.page_number}
+                                snippet={cit.snippet}
+                              />
+                            ))}
+                          </div>
                         </div>
-                        <div className="flex flex-wrap gap-1.5">
-                          {msg.citations.map((cit, idx) => (
-                            <CitationBadge
-                              key={`${cit.file_name}-${cit.page_number}-${idx}`}
-                              fileName={cit.file_name}
-                              pageNumber={cit.page_number}
-                              snippet={cit.snippet}
-                            />
-                          ))}
-                        </div>
-                      </div>
-                    )}
+                      )}
+                    </div>
+                    <span className="text-[10px] text-slate-400 mt-1 px-1">
+                      {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </span>
                   </div>
-                  <span className="text-[10px] text-slate-400 mt-1 px-1">
-                    {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                  </span>
-                </div>
-              ))
-            )}
+                ))
+              )}
 
-            {isLoading && (
-              <div className="flex items-center gap-2 text-slate-400 text-xs py-2 px-3 bg-slate-800/50 rounded-lg w-fit border border-slate-700/40 animate-pulse">
-                <Loader2 className="w-4 h-4 animate-spin text-indigo-400" />
-                <span>Consultando documentos da conversa com Gemini AI...</span>
-              </div>
-            )}
-            <div ref={messagesEndRef} />
+              {isLoading && (
+                <div className="flex items-center gap-2 text-slate-400 text-xs py-2 px-3 bg-slate-800/60 rounded-lg w-fit border border-slate-700/40 animate-pulse">
+                  <Loader2 className="w-4 h-4 animate-spin text-indigo-400" />
+                  <span>Consultando documentos da conversa com Gemini AI...</span>
+                </div>
+              )}
+              <div ref={messagesEndRef} />
+            </div>
           </div>
 
           {/* Chat Input */}
-          <div className="p-3 border-t border-slate-800 bg-slate-950/40">
-            <form onSubmit={handleSendMessage} className="flex gap-2">
+          <div className="p-3 sm:p-4 border-t border-slate-800 bg-slate-950/60 backdrop-blur-sm">
+            <form onSubmit={handleSendMessage} className="max-w-3xl mx-auto flex gap-2">
               <input
                 type="text"
                 value={inputQuery}
                 onChange={(e) => setInputQuery(e.target.value)}
                 placeholder="Pergunte algo sobre os documentos desta conversa..."
                 disabled={isLoading}
-                className="flex-1 bg-slate-800/90 border border-slate-700 text-slate-100 text-sm rounded-lg px-3.5 py-2.5 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent placeholder-slate-500 transition-all disabled:opacity-50"
+                className="flex-1 bg-slate-800/90 border border-slate-700 text-slate-100 text-xs sm:text-sm rounded-xl px-3.5 py-2.5 sm:py-3 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent placeholder-slate-400 transition-all disabled:opacity-50"
               />
               <button
                 type="submit"
                 disabled={isLoading || !inputQuery.trim()}
-                className="bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 text-white p-2.5 rounded-lg font-medium transition-all shadow-md flex items-center justify-center cursor-pointer disabled:cursor-not-allowed"
+                className="bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 text-white p-2.5 sm:p-3 rounded-xl font-medium transition-all shadow-md flex items-center justify-center cursor-pointer disabled:cursor-not-allowed flex-shrink-0"
                 aria-label="Enviar"
               >
-                {isLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
+                {isLoading ? <Loader2 className="w-4 h-4 sm:w-5 sm:h-5 animate-spin" /> : <Send className="w-4 h-4 sm:w-5 sm:h-5" />}
               </button>
             </form>
           </div>
@@ -361,8 +413,8 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
 
       {/* Upload PDF Tab */}
       {activeTab === 'upload' && (
-        <div className="p-6 flex-1 overflow-y-auto space-y-6">
-          <div className="border-2 border-dashed border-slate-700 hover:border-indigo-500 rounded-xl p-8 text-center transition-all bg-slate-800/30 flex flex-col items-center justify-center">
+        <div className="p-4 sm:p-8 flex-1 overflow-y-auto space-y-6">
+          <div className="max-w-xl mx-auto border-2 border-dashed border-slate-700 hover:border-indigo-500 rounded-2xl p-6 sm:p-10 text-center transition-all bg-slate-800/30 flex flex-col items-center justify-center">
             <input
               type="file"
               ref={fileInputRef}
@@ -374,30 +426,30 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
             />
             <label
               htmlFor="pdf-upload-input"
-              className="cursor-pointer flex flex-col items-center space-y-2"
+              className="cursor-pointer flex flex-col items-center space-y-3"
             >
-              <div className="p-3 bg-indigo-600/20 text-indigo-400 rounded-full border border-indigo-500/30">
-                <Upload className="w-6 h-6" />
+              <div className="p-3 sm:p-4 bg-indigo-600/20 text-indigo-400 rounded-2xl border border-indigo-500/30 shadow-inner">
+                <Upload className="w-6 h-6 sm:w-8 sm:h-8" />
               </div>
-              <span className="text-sm font-semibold text-slate-200">
+              <span className="text-sm sm:text-base font-semibold text-slate-200">
                 Clique para selecionar arquivos PDF
               </span>
-              <span className="text-xs text-slate-400">
-                Os arquivos serão associados exclusivamente a esta conversa.
+              <span className="text-xs text-slate-400 max-w-xs leading-relaxed">
+                Os arquivos serão anexados exclusivamente aos documentos desta conversa.
               </span>
             </label>
           </div>
 
           {isUploading && (
-            <div className="flex items-center justify-center gap-2 p-3 bg-indigo-950/60 border border-indigo-700/50 rounded-lg text-indigo-200 text-sm">
+            <div className="max-w-xl mx-auto flex items-center justify-center gap-2 p-3 bg-indigo-950/60 border border-indigo-700/50 rounded-xl text-indigo-200 text-xs sm:text-sm">
               <Loader2 className="w-4 h-4 animate-spin text-indigo-400" />
               <span>Processando e indexando documentos na conversa...</span>
             </div>
           )}
 
           {uploadFeedback && (
-            <div className="p-3 bg-slate-800/80 border border-slate-700 rounded-lg text-xs text-slate-300 flex items-center gap-2">
-              <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+            <div className="max-w-xl mx-auto p-3.5 bg-slate-800/80 border border-slate-700 rounded-xl text-xs sm:text-sm text-slate-300 flex items-center gap-2.5">
+              <CheckCircle2 className="w-4 h-4 sm:w-5 sm:h-5 text-emerald-400 flex-shrink-0" />
               <span>{uploadFeedback}</span>
             </div>
           )}
@@ -406,7 +458,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
 
       {/* Insert Free Text Tab */}
       {activeTab === 'text' && (
-        <form onSubmit={handleTextUpload} className="p-6 flex-1 overflow-y-auto space-y-4">
+        <form onSubmit={handleTextUpload} className="p-4 sm:p-8 flex-1 overflow-y-auto space-y-4 max-w-xl mx-auto w-full">
           <div>
             <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">
               Título do Documento / Nota
@@ -416,7 +468,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
               value={freeTextTitle}
               onChange={(e) => setFreeTextTitle(e.target.value)}
               placeholder="Ex: Anotações da Reunião"
-              className="w-full bg-slate-800/90 border border-slate-700 text-slate-100 text-sm rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+              className="w-full bg-slate-800/90 border border-slate-700 text-slate-100 text-xs sm:text-sm rounded-xl px-3.5 py-2.5 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
             />
           </div>
 
@@ -429,14 +481,14 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
               onChange={(e) => setFreeText(e.target.value)}
               rows={8}
               placeholder="Cole ou digite aqui o texto que deve ser incorporado aos documentos desta conversa..."
-              className="w-full bg-slate-800/90 border border-slate-700 text-slate-100 text-sm rounded-lg p-3 focus:ring-2 focus:ring-indigo-500 focus:outline-none resize-none leading-relaxed"
+              className="w-full bg-slate-800/90 border border-slate-700 text-slate-100 text-xs sm:text-sm rounded-xl p-3.5 focus:ring-2 focus:ring-indigo-500 focus:outline-none resize-none leading-relaxed"
             />
           </div>
 
           <button
             type="submit"
             disabled={isUploading || !freeText.trim()}
-            className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 text-white font-medium py-2.5 rounded-lg text-sm transition-all flex items-center justify-center gap-2 shadow-md cursor-pointer disabled:cursor-not-allowed"
+            className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 text-white font-medium py-3 rounded-xl text-xs sm:text-sm transition-all flex items-center justify-center gap-2 shadow-md cursor-pointer disabled:cursor-not-allowed"
           >
             {isUploading ? (
               <>
@@ -452,8 +504,8 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
           </button>
 
           {uploadFeedback && (
-            <div className="p-3 bg-slate-800/80 border border-slate-700 rounded-lg text-xs text-slate-300 flex items-center gap-2">
-              <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+            <div className="p-3.5 bg-slate-800/80 border border-slate-700 rounded-xl text-xs sm:text-sm text-slate-300 flex items-center gap-2.5">
+              <CheckCircle2 className="w-4 h-4 sm:w-5 sm:h-5 text-emerald-400 flex-shrink-0" />
               <span>{uploadFeedback}</span>
             </div>
           )}

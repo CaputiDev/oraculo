@@ -1,43 +1,72 @@
 'use client';
 
-import React, { useState } from 'react';
+import React from 'react';
 import { Sidebar } from '../components/Sidebar';
 import { ChatArea } from '../components/ChatArea';
 import { PDFViewer } from '../components/PDFViewer';
-import { PanelLeftClose, PanelLeftOpen } from 'lucide-react';
+import { useConversationStore } from '../store/useConversationStore';
+import { useViewerStore } from '../store/useViewerStore';
 
 export default function Home() {
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const { isSidebarOpen, setSidebarOpen } = useConversationStore();
+  const { isViewerOpen, setViewerOpen } = useViewerStore();
 
   return (
-    <main className="flex h-screen w-screen overflow-hidden bg-slate-950">
-      {/* Painel Esquerdo: Barra Lateral de Histórico e Conversas */}
+    <main className="flex h-screen w-screen overflow-hidden bg-slate-950 text-slate-100 relative">
+      {/* --- SIDEBAR (HISTÓRICO DE SESSÕES) --- */}
+      
+      {/* Backdrop para Mobile quando Sidebar estiver aberta */}
+      {isSidebarOpen && (
+        <div
+          onClick={() => setSidebarOpen(false)}
+          className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 lg:hidden transition-opacity duration-300"
+          aria-hidden="true"
+        />
+      )}
+
+      {/* Sidebar Container (Desktop: Split flex | Mobile: Drawer fixo sobreposto) */}
       <div
-        className={`${
-          sidebarOpen ? 'w-64 md:w-72' : 'w-0'
-        } transition-all duration-300 ease-in-out h-full overflow-hidden flex-shrink-0 relative z-20`}
+        className={`
+          fixed lg:static inset-y-0 left-0 z-50 h-full overflow-hidden flex-shrink-0 transition-all duration-300 ease-in-out
+          ${isSidebarOpen ? 'w-72 sm:w-80 translate-x-0' : 'w-0 -translate-x-full lg:translate-x-0'}
+        `}
       >
-        <Sidebar />
+        <div className="w-72 sm:w-80 h-full">
+          <Sidebar onClose={() => setSidebarOpen(false)} />
+        </div>
       </div>
 
-      {/* Botão Flutuante de Alternância da Barra Lateral */}
-      <button
-        onClick={() => setSidebarOpen(!sidebarOpen)}
-        className="absolute bottom-3 left-3 z-30 p-2 bg-slate-900/80 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border border-slate-700/80 rounded-lg shadow-lg backdrop-blur transition hidden md:flex items-center justify-center"
-        title={sidebarOpen ? 'Recolher barra lateral' : 'Expandir barra lateral'}
-      >
-        {sidebarOpen ? <PanelLeftClose className="w-4 h-4" /> : <PanelLeftOpen className="w-4 h-4" />}
-      </button>
-
-      {/* Painel Central: Chat, Uploads e Ingestão de Documentos da Conversa */}
-      <section className="flex-1 min-w-0 h-full flex flex-col z-10 shadow-lg border-r border-slate-800">
+      {/* --- ÁREA PRINCIPAL DE CHAT --- */}
+      <section className="flex-1 min-w-0 h-full flex flex-col z-10 overflow-hidden relative">
         <ChatArea />
       </section>
 
-      {/* Painel Direito: Visualizador de PDF e Leitor de Textos da Conversa */}
-      <section className="hidden lg:flex lg:w-[48%] xl:w-[50%] h-full flex-col">
-        <PDFViewer />
-      </section>
+      {/* --- VISUALIZADOR DE DOCUMENTOS (PDF / TEXTO) --- */}
+      
+      {/* Backdrop para Mobile quando Viewer estiver aberto */}
+      {isViewerOpen && (
+        <div
+          onClick={() => setViewerOpen(false)}
+          className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 lg:hidden transition-opacity duration-300"
+          aria-hidden="true"
+        />
+      )}
+
+      {/* PDFViewer Container (Desktop: Split flex | Mobile: Drawer fixo sobreposto) */}
+      <div
+        className={`
+          fixed lg:static inset-y-0 right-0 z-50 h-full overflow-hidden flex-shrink-0 transition-all duration-300 ease-in-out
+          ${
+            isViewerOpen
+              ? 'w-full sm:w-[90%] md:w-[560px] lg:w-[48%] xl:w-[50%] translate-x-0'
+              : 'w-0 translate-x-full lg:translate-x-0'
+          }
+        `}
+      >
+        <div className="w-full sm:w-[90vw] md:w-[560px] lg:w-full h-full">
+          <PDFViewer onClose={() => setViewerOpen(false)} />
+        </div>
+      </div>
     </main>
   );
 }

@@ -6,6 +6,7 @@ interface ViewerState {
   totalPages: number;
   zoom: number;
   documents: string[];
+  isViewerOpen: boolean;          // Controle do sidebar/painel do visualizador (recolhido por padrão)
   
   // Actions
   setActiveFile: (file: string | null) => void;
@@ -14,6 +15,8 @@ interface ViewerState {
   setZoom: (zoom: number) => void;
   setDocuments: (docs: string[]) => void;
   jumpToCitation: (fileName: string, pageNumber: number) => void;
+  setViewerOpen: (open: boolean) => void;
+  toggleViewer: () => void;
   resetViewer: () => void;
 }
 
@@ -23,6 +26,7 @@ export const useViewerStore = create<ViewerState>((set, get) => ({
   totalPages: 1,
   zoom: 100,
   documents: [],
+  isViewerOpen: false,
 
   setActiveFile: (file) => set({
     activeFile: file,
@@ -53,9 +57,18 @@ export const useViewerStore = create<ViewerState>((set, get) => ({
     set((state) => ({
       activeFile: fileName,
       activePage: validPage,
-      totalPages: Math.max(state.totalPages, validPage)
+      totalPages: Math.max(state.totalPages, validPage),
+      isViewerOpen: true, // Abre o painel automaticamente ao clicar na citação
     }));
   },
+
+  setViewerOpen: (open) => set({
+    isViewerOpen: open
+  }),
+
+  toggleViewer: () => set((state) => ({
+    isViewerOpen: !state.isViewerOpen
+  })),
 
   resetViewer: () => set({
     activeFile: null,
@@ -63,5 +76,6 @@ export const useViewerStore = create<ViewerState>((set, get) => ({
     totalPages: 1,
     zoom: 100,
     documents: [],
+    isViewerOpen: false,
   }),
 }));

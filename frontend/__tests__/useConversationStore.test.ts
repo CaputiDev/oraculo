@@ -10,11 +10,20 @@ describe('useConversationStore - Zustand Store', () => {
     jest.resetAllMocks();
   });
 
-  it('deve inicializar com estado padrão vazio', () => {
+  it('deve inicializar com estado padrão vazio e barra lateral recolhida por padrão', () => {
     const state = useConversationStore.getState();
     expect(state.conversations).toEqual([]);
     expect(state.activeConversationId).toBeNull();
     expect(state.activeConversation).toBeNull();
+    expect(state.isSidebarOpen).toBe(false);
+  });
+
+  it('deve alternar a visibilidade da barra lateral', () => {
+    expect(useConversationStore.getState().isSidebarOpen).toBe(false);
+    useConversationStore.getState().toggleSidebar();
+    expect(useConversationStore.getState().isSidebarOpen).toBe(true);
+    useConversationStore.getState().setSidebarOpen(false);
+    expect(useConversationStore.getState().isSidebarOpen).toBe(false);
   });
 
   it('deve criar uma nova conversa e defini-la como ativa', async () => {
@@ -40,7 +49,6 @@ describe('useConversationStore - Zustand Store', () => {
   });
 
   it('deve anexar mensagens à conversa ativa', () => {
-    // Define uma conversa ativa manualmente
     useConversationStore.setState({
       activeConversationId: 'conv-1',
       activeConversation: {

@@ -8,18 +8,20 @@ import {
   Files, 
   Sparkles, 
   Clock, 
-  ChevronRight,
-  Database
+  X,
+  PanelLeftClose
 } from 'lucide-react';
 import { useConversationStore } from '../store/useConversationStore';
 import { useViewerStore } from '../store/useViewerStore';
 
 interface SidebarProps {
   apiBaseUrl?: string;
+  onClose?: () => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
   apiBaseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api',
+  onClose,
 }) => {
   const {
     conversations,
@@ -29,6 +31,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     selectConversation,
     createConversation,
     deleteConversation,
+    setSidebarOpen,
   } = useConversationStore();
 
   const { resetViewer } = useViewerStore();
@@ -36,6 +39,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
   useEffect(() => {
     fetchConversations(apiBaseUrl);
   }, [apiBaseUrl, fetchConversations]);
+
+  const handleClose = () => {
+    if (onClose) {
+      onClose();
+    } else {
+      setSidebarOpen(false);
+    }
+  };
 
   const handleNewConversation = async () => {
     resetViewer();
@@ -66,17 +77,28 @@ export const Sidebar: React.FC<SidebarProps> = ({
   };
 
   return (
-    <aside className="w-72 h-full bg-slate-950 border-r border-slate-800 flex flex-col select-none">
-      {/* Top App Branding & New Chat Button */}
-      <div className="p-3 border-b border-slate-800/80 space-y-3 bg-slate-950/80">
-        <div className="flex items-center gap-2.5 px-1 pt-1">
-          <div className="p-1.5 bg-indigo-600/20 text-indigo-400 rounded-lg border border-indigo-500/30">
-            <Sparkles className="w-4 h-4" />
+    <aside className="w-full h-full bg-slate-950 border-r border-slate-800 flex flex-col select-none shadow-2xl">
+      {/* Top App Branding, Close Button & New Chat Button */}
+      <div className="p-3 border-b border-slate-800/80 space-y-3 bg-slate-950/90">
+        <div className="flex items-center justify-between px-1 pt-1">
+          <div className="flex items-center gap-2.5">
+            <div className="p-1.5 bg-indigo-600/20 text-indigo-400 rounded-lg border border-indigo-500/30">
+              <Sparkles className="w-4 h-4" />
+            </div>
+            <div>
+              <h1 className="text-xs font-bold tracking-wider text-slate-100 uppercase">Oráculo RAG</h1>
+              <p className="text-[10px] text-slate-400 font-mono">Multi-Sessão & Citações</p>
+            </div>
           </div>
-          <div>
-            <h1 className="text-xs font-bold tracking-wider text-slate-100 uppercase">Oráculo RAG</h1>
-            <p className="text-[10px] text-slate-400 font-mono">Multi-Sessão & Citações</p>
-          </div>
+
+          <button
+            onClick={handleClose}
+            className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition"
+            title="Recolher barra lateral"
+            aria-label="Fechar histórico"
+          >
+            <PanelLeftClose className="w-4 h-4" />
+          </button>
         </div>
 
         <button

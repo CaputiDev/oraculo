@@ -7,6 +7,7 @@ interface ConversationState {
   activeConversation: ConversationDetail | null;
   isLoadingConversations: boolean;
   isLoadingDetail: boolean;
+  isSidebarOpen: boolean; // default false (recolhido por padrão)
 
   // Actions
   fetchConversations: (apiBaseUrl?: string) => Promise<void>;
@@ -15,6 +16,8 @@ interface ConversationState {
   deleteConversation: (id: string, apiBaseUrl?: string) => Promise<void>;
   appendMessageToActive: (message: ChatMessage) => void;
   addFileToActive: (fileName: string) => void;
+  setSidebarOpen: (open: boolean) => void;
+  toggleSidebar: () => void;
   resetConversationStore: () => void;
 }
 
@@ -26,6 +29,7 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
   activeConversation: null,
   isLoadingConversations: false,
   isLoadingDetail: false,
+  isSidebarOpen: false,
 
   fetchConversations: async (apiBaseUrl = DEFAULT_API_URL) => {
     set({ isLoadingConversations: true });
@@ -37,7 +41,6 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
 
         const currentActiveId = get().activeConversationId;
         if (!currentActiveId && data.length > 0) {
-          // Seleciona automaticamente a conversa mais recente
           get().selectConversation(data[0].id, apiBaseUrl);
         }
       }
@@ -54,7 +57,6 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
       const res = await fetch(`${apiBaseUrl}/conversations/${encodeURIComponent(id)}`);
       if (res.ok) {
         const data: ConversationDetail = await res.json();
-        // Mapeia mensagens do backend para a interface ChatMessage
         const mappedMessages: ChatMessage[] = (data.messages || []).map((m: any) => ({
           id: m.id,
           role: m.role,
@@ -171,6 +173,9 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
     });
   },
 
+  setSidebarOpen: (open: boolean) => set({ isSidebarOpen: open }),
+  toggleSidebar: () => set((state) => ({ isSidebarOpen: !state.isSidebarOpen })),
+
   resetConversationStore: () => {
     set({
       conversations: [],
@@ -178,6 +183,7 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
       activeConversation: null,
       isLoadingConversations: false,
       isLoadingDetail: false,
+      isSidebarOpen: false,
     });
   },
 }));
